@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { EditComponent } from './edit.component';
 import { provideHttpClient } from '@angular/common/http';
-import { provideToastr } from 'ngx-toastr';
+import { provideToastr } from '@openng/ngx-toastr';
 import { provideRouter } from '@angular/router';
 
 describe('EditComponent', () => {

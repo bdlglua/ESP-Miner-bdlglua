@@ -1,9 +1,11 @@
-import { Component, ViewChild, AfterViewInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewChild, AfterViewInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { NetworkEditComponent } from '../network-edit/network.edit.component';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-network',
   templateUrl: './network.component.html',
   styleUrls: ['./network.component.scss'],

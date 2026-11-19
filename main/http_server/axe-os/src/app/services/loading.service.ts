@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, defer, finalize, Observable } from 'rxjs';
 
 @Injectable({
   providedIn: 'root'
@@ -7,26 +7,19 @@ import { BehaviorSubject, Observable } from 'rxjs';
 export class LoadingService {
 
   public loading$: BehaviorSubject<boolean> = new BehaviorSubject(false);
+  private activeOperations = 0;
 
   constructor() { }
 
   public lockUIUntilComplete() {
     return <T>(source: Observable<T>): Observable<T> => {
-      return new Observable(subscriber => {
+      return defer(() => {
+        this.activeOperations++;
         this.loading$.next(true);
-        source.subscribe({
-          next: (value) => {
-            subscriber.next(value);
-          },
-          error: (err) => {
-            this.loading$.next(false);
-            subscriber.error(err);
-          },
-          complete: () => {
-            this.loading$.next(false);
-            subscriber.complete();
-          }
-        })
+        return source.pipe(finalize(() => {
+          this.activeOperations--;
+          this.loading$.next(this.activeOperations > 0);
+        }));
       });
     }
   }

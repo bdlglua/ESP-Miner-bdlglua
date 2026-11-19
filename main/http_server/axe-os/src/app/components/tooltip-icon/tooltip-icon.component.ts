@@ -1,6 +1,8 @@
-import { Component, Input, HostListener } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, HostListener } from '@angular/core';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'tooltip-icon',
   templateUrl: './tooltip-icon.component.html',
   styleUrls: ['./tooltip-icon.component.scss'],

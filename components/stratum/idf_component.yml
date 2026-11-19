@@ -1,0 +1,8 @@
+## cJSON left ESP-IDF in 6.0. stratum_api.h exposes cJSON types, so the
+## dependency is public for every component that includes it (asic, connect, main).
+dependencies:
+  espressif/cjson:
+    version: "1.7.19~2"
+    require: public
+  idf:
+    version: ">=6.1.0"

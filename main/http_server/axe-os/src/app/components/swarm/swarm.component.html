@@ -26,7 +26,7 @@
                         <i class="pi pi-sort-{{option.value.sortDirection === 'asc' ? 'up' : 'down'}}-fill text-xs ml-2"></i>
                     </ng-template>
 
-                    <p-dropdown
+                    <p-select
                         [options]="sortOptions"
                         [(ngModel)]="selectedSort"
                         (onChange)="onSortChange($event)"
@@ -41,7 +41,7 @@
                         <ng-template let-option pTemplate="selectedItem">
                             <ng-container *ngTemplateOutlet="sortTemplate; context: { $implicit: option }"></ng-container>
                         </ng-template>
-                    </p-dropdown>
+                    </p-select>
                 </div>
 
                 <div class="w-full p-input-icon-left relative">
@@ -366,10 +366,10 @@
         </div>
 
         <div class="md:ml-auto">
-            <p-inputGroup>
+            <p-inputgroup>
                 <input pInputText placeholder="Add Device by IP" formControlName="manualAddIp" type="text" class="xl:w-20rem" />
                 <button pButton [disabled]="form.invalid" (click)="add()" class="ml-1">Add</button>
-            </p-inputGroup>
+            </p-inputgroup>
         </div>
     </form>
 

@@ -1,7 +1,11 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, Input, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, OnInit } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ValidatorFn, ValidationErrors, AbstractControl } from '@angular/forms';
-import { ToastrService } from 'ngx-toastr';
+import { catchError, exhaustMap, Observable, of, timer } from 'rxjs';
+import { isZpoolSha256 } from 'src/app/services/pool-hosts';
+import { PoolStatistics } from 'src/app/services/miner-diagnostics';
+import { PoolProfile, PoolSettings, PROFILE_LIMIT, poolProfile, readPoolProfiles } from './pool-profiles';
+import { ToastrService } from '@openng/ngx-toastr';
 import { LoadingService } from 'src/app/services/loading.service';
 import { SystemApiService } from 'src/app/services/system.service';
 
@@ -13,19 +17,35 @@ interface ITlsOption {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-pool',
   templateUrl: './pool.component.html',
-  styleUrls: ['./pool.component.scss']
+  styleUrl: './pool.component.scss'
 })
 export class PoolComponent implements OnInit {
   public form!: FormGroup;
   public savedChanges: boolean = false;
+
+  public profiles: PoolProfile[] = [];
+  public selectedProfiles = {stratum: '', fallbackStratum: ''};
+  public profileNames = {stratum: '', fallbackStratum: ''};
+  public stats$!: Observable<PoolStatistics | null>;
+  public readonly poolRoles = ['primary', 'fallback'] as const;
+  private profileStorageKey = '';
 
   public readonly DEFAULT_BITCOIN_ADDRESS = 'bc1qnp980s5fpp8l94p5cvttmtdqy8rvrq74qly2yrfmzkdsntqzlc5qkc4rkq';
 
   public pools: PoolType[] = ['stratum', 'fallbackStratum'];
   public showPassword = { 'stratum': false, 'fallbackStratum': false };
   public showAdvancedOptions = { 'stratum': false, 'fallbackStratum': false };
+
+  public readonly coinOptions = [
+    {value: 0, label: 'Auto (payout address)'},
+    {value: 1, label: 'Bitcoin (BTC)'},
+    {value: 2, label: 'Peercoin (PPC)'},
+    {value: 3, label: 'DigiByte (DGB, SHA-256d)'}
+  ];
 
   public tlsOptions: ITlsOption[] = [
     { value: 0, label: 'No TLS' },
@@ -43,11 +63,20 @@ export class PoolComponent implements OnInit {
   ) { }
 
   ngOnInit(): void {
+    this.stats$ = timer(0, 10000).pipe(
+      exhaustMap(() => this.systemService.getPoolStatistics(this.uri).pipe(catchError(() => of(null))))
+    );
     this.systemService.getInfo(this.uri)
       .pipe(
         this.loadingService.lockUIUntilComplete()
       )
       .subscribe(info => {
+        this.profileStorageKey = `axeos.poolProfiles.v1.${info.macAddr || this.uri || location.host}`;
+        try {
+          this.profiles = readPoolProfiles(localStorage.getItem(this.profileStorageKey));
+        } catch {
+          this.profiles = [];
+        }
         this.form = this.fb.group({
           stratumURL: [info.stratumURL, [
             Validators.required,
@@ -62,6 +91,7 @@ export class PoolComponent implements OnInit {
           stratumExtranonceSubscribe: [info.stratumExtranonceSubscribe == true, [Validators.required]],
           stratumSuggestedDifficulty: [info.stratumSuggestedDifficulty, [Validators.required]],
           stratumUser: [info.stratumUser, [Validators.required]],
+          stratumCoin: [info.stratumCoin ?? 0, [Validators.required, Validators.pattern(/^[0-3]$/)]],
           stratumPassword: ['*****', [Validators.required]],
           stratumTLS: [info.stratumTLS || 0],
           stratumCert: [info.stratumCert],
@@ -81,6 +111,7 @@ export class PoolComponent implements OnInit {
           fallbackStratumCert: [info.fallbackStratumCert],
           fallbackStratumDecodeCoinbase: [info.fallbackStratumDecodeCoinbase == true, [Validators.required]],
           fallbackStratumUser: [info.fallbackStratumUser, [Validators.required]],
+          fallbackStratumCoin: [info.fallbackStratumCoin ?? 0, [Validators.required, Validators.pattern(/^[0-3]$/)]],
           fallbackStratumPassword: ['*****', [Validators.required]]
         });
 
@@ -107,6 +138,80 @@ export class PoolComponent implements OnInit {
         this.form.get('stratumTLS')?.updateValueAndValidity();
         this.form.get('fallbackStratumTLS')?.updateValueAndValidity();
       });
+  }
+
+  public isZpool(pool: PoolType): boolean {
+    return isZpoolSha256(this.form.get(pool + 'URL')?.value);
+  }
+
+  public useZpoolPreset(pool: PoolType): void {
+    this.form.patchValue({
+      [pool + 'URL']: 'sha256.eu.mine.zpool.ca',
+      [pool + 'Port']: 53333,
+      [pool + 'User']: '',
+      [pool + 'Password']: 'c=BTC',
+      [pool + 'Coin']: 0,
+      [pool + 'TLS']: 1,
+      [pool + 'Cert']: '',
+      [pool + 'SuggestedDifficulty']: 0,
+      [pool + 'ExtranonceSubscribe']: false,
+      [pool + 'DecodeCoinbase']: false,
+    });
+    this.showPassword[pool] = false;
+    this.form.get(pool + 'Password')?.markAsDirty();
+    this.form.markAsDirty();
+  }
+
+  public saveProfile(pool: PoolType): void {
+    const keys: (keyof PoolSettings)[] = [
+      'URL', 'Port', 'User', 'Coin', 'TLS', 'Cert', 'SuggestedDifficulty', 'ExtranonceSubscribe', 'DecodeCoinbase'
+    ];
+    const settings = Object.fromEntries(keys.map(key => [key, this.form.get(pool + key)?.value]));
+    const profile = poolProfile(this.profileNames[pool], settings);
+    if (!profile || keys.some(key => this.form.get(pool + key)?.invalid)) {
+      this.toastr.error('Enter a name and valid pool settings.');
+      return;
+    }
+    if (this.profiles.some(saved => saved.name.toLowerCase() === profile.name.toLowerCase())) {
+      this.toastr.error('A profile already uses that name.');
+      return;
+    }
+    if (this.profiles.length >= PROFILE_LIMIT) {
+      this.toastr.error('Remove a profile to make room for another.');
+      return;
+    }
+    if (this.writeProfiles([...this.profiles, profile])) this.profileNames[pool] = '';
+  }
+
+  public loadProfile(pool: PoolType, name: string): void {
+    const profile = this.profiles.find(saved => saved.name === name);
+    if (!profile) return;
+    this.form.patchValue(Object.fromEntries(Object.entries(profile.settings).map(([key, value]) => [pool + key, value])));
+    // Require a fresh password so the previous pool's password cannot be reused by accident.
+    const password = this.form.get(pool + 'Password');
+    password?.setValue('');
+    password?.markAsDirty();
+    this.showPassword[pool] = false;
+    this.form.markAsDirty();
+  }
+
+  public deleteProfile(name: string): void {
+    if (this.writeProfiles(this.profiles.filter(profile => profile.name !== name))) {
+      for (const pool of this.pools) {
+        if (this.selectedProfiles[pool] === name) this.selectedProfiles[pool] = '';
+      }
+    }
+  }
+
+  private writeProfiles(profiles: PoolProfile[]): boolean {
+    try {
+      localStorage.setItem(this.profileStorageKey, JSON.stringify(profiles));
+      this.profiles = profiles;
+      return true;
+    } catch {
+      this.toastr.error('Pool profiles could not be saved in this browser.');
+      return false;
+    }
   }
 
   public updateSystem() {
@@ -176,11 +281,10 @@ export class PoolComponent implements OnInit {
       { prefix: 'stratum+ssl://', tlsMode: true }
     ] as const;
 
-    let isTlsMode = 0;
     const matched = prefixes.find(({ prefix }) => urlValue.startsWith(prefix));
     if (matched) {
       urlValue = urlValue.slice(matched.prefix.length);
-      isTlsMode = +matched.tlsMode;
+      tlsControl.setValue(Number(matched.tlsMode));
     }
 
     const { cleanUrl, port } = this.extractPort(urlValue);
@@ -189,7 +293,6 @@ export class PoolComponent implements OnInit {
       portControl.setValue(port);
     }
     urlControl.setValue(cleanUrl);
-    tlsControl.setValue(isTlsMode);
   }
 
   onCertFileSelected(event: Event, formControlName: string): void {

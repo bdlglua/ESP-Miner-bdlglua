@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <sys/time.h>
 #include <esp_transport.h>
 
@@ -12,6 +13,7 @@
 #define COINBASE_SIZE 100
 #define COINBASE2_SIZE 128
 #define MAX_REQUEST_IDS 1024
+#define STRATUM_FIRST_SHARE_ID 6 // IDs 1–5 are reserved for connection setup.
 #define MAX_EXTRANONCE_2_LEN 32
 
 typedef enum
@@ -51,6 +53,11 @@ typedef struct
     uint32_t target;
     uint32_t ntime;
     bool clean_jobs;
+    // Captured once per pool notification, never borrowed from mutable session state.
+    uint32_t work_epoch, work_version_mask, work_difficulty;
+    char *work_extranonce1;
+    int work_extranonce2_len;
+    struct bm1370_work_template *work_template; // Owned by the notification.
 } mining_notify;
 
 typedef struct
@@ -73,19 +80,18 @@ typedef struct
     char * error_str;
 } StratumApiV1Message;
 
-typedef struct {
-    int64_t timestamp_us;
-    bool tracking;
-} RequestTiming;
-
 esp_transport_handle_t STRATUM_V1_transport_init(tls_mode tls, char * cert);
 
 void STRATUM_V1_initialize_buffer();
 
+typedef enum { STRATUM_READ_ERROR = -1, STRATUM_READ_IDLE, STRATUM_READ_MORE, STRATUM_READ_LINE } stratum_read_result;
+stratum_read_result STRATUM_V1_read_step(esp_transport_handle_t transport, int timeout_ms, char **line);
 char *STRATUM_V1_receive_jsonrpc_line(esp_transport_handle_t transport);
 
 int STRATUM_V1_subscribe(esp_transport_handle_t transport, int send_uid, const char * model);
 
+// Zero-initialize message before its first parse. error_str is owned by message,
+// replaced/freed on the next parse, and must be freed after the last parse.
 void STRATUM_V1_parse(StratumApiV1Message *message, const char *stratum_json);
 
 void STRATUM_V1_free_mining_notify(mining_notify *params);

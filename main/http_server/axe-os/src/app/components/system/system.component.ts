@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { Observable, Subject, combineLatest, switchMap, shareReplay, first, takeUntil, map, timer } from 'rxjs';
+import { ChangeDetectionStrategy, Component, OnInit, OnDestroy } from '@angular/core';
+import { Observable, Subject, combineLatest, switchMap, shareReplay, first, takeUntil, map, timer, catchError, defer, of } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ToastrService } from 'ngx-toastr';
+import { ToastrService } from '@openng/ngx-toastr';
 import { SystemApiService } from 'src/app/services/system.service';
 import { LoadingService } from 'src/app/services/loading.service';
 import { DateAgoPipe } from 'src/app/pipes/date-ago.pipe';
@@ -23,10 +23,14 @@ type CombinedData = {
 };
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-system',
   templateUrl: './system.component.html',
 })
 export class SystemComponent implements OnInit, OnDestroy {
+  public incidentHistory$ = defer(() => this.systemService.getIncidentHistory()).pipe(catchError(() => of(null)));
+
   public info$: Observable<ISystemInfo>;
   public asic$: Observable<ISystemASIC>;
   public combinedData$: Observable<{ info: ISystemInfo, asic: ISystemASIC }>
@@ -53,13 +57,9 @@ export class SystemComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
-    this.loadingService.loading$.next(true);
-
     this.combinedData$
-      .pipe(first(), takeUntil(this.destroy$))
-      .subscribe({
-        next: () => this.loadingService.loading$.next(false)
-      });
+      .pipe(first(), this.loadingService.lockUIUntilComplete(), takeUntil(this.destroy$))
+      .subscribe();
   }
 
   ngOnDestroy() {

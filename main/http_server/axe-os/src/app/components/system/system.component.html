@@ -14,3 +14,26 @@
         </button>
     </div>
 </div>
+<div class="card">
+    <h2>Incident history</h2>
+    <ng-container *ngIf="incidentHistory$ | async as history; else noIncidents">
+        <p>Last {{ history.entries.length }} recorded boots, newest first.</p>
+        <p *ngIf="!history.persisted">The latest entry could not be saved to flash.</p>
+        <p *ngIf="!history.crashCaptureEnabled">Crash trace capture is disabled on this firmware.</p>
+        <div *ngFor="let event of history.entries" class="card">
+            <strong>#{{ event.sequence }} · {{ event.reason }}</strong>
+            <p class="mb-0">Boot firmware {{ event.bootVersion }}</p>
+            <details *ngIf="event.pc != null" class="mt-2">
+                <summary>Crash trace</summary>
+                <p *ngIf="event.panic">{{ event.panic }}</p>
+                <p>Task {{ event.task || '—' }} · PC <code>0x{{ event.pc.toString(16) }}</code></p>
+                <p *ngIf="event.elfSha256">Firmware ELF hash <code>{{ event.elfSha256 }}</code></p>
+                <p *ngIf="event.partialTrace">The crash trace is partial.</p>
+                <ol *ngIf="event.backtrace?.length">
+                    <li *ngFor="let address of event.backtrace"><code>0x{{ address.toString(16) }}</code></li>
+                </ol>
+            </details>
+        </div>
+    </ng-container>
+    <ng-template #noIncidents><p>Incident history unavailable.</p></ng-template>
+</div>

@@ -1,8 +1,8 @@
-import { Component, ViewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewChild } from '@angular/core';
 import { Observable, switchMap, shareReplay, map, timer, distinctUntilChanged } from 'rxjs';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
-import { ToastrService } from 'ngx-toastr';
-import { FileUploadHandlerEvent, FileUpload } from 'primeng/fileupload';
+import { ToastrService } from '@openng/ngx-toastr';
+import { FileUploadHandlerEvent, FileUpload } from '@openng/optimus-ui/fileupload';
 import { GithubUpdateService } from 'src/app/services/github-update.service';
 import { LoadingService } from 'src/app/services/loading.service';
 import { SystemApiService } from 'src/app/services/system.service';
@@ -12,6 +12,8 @@ import { ModalComponent } from '../modal/modal.component';
 const IGNORE_RELEASE_CHECK_WARNING = 'IGNORE_RELEASE_CHECK_WARNING';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-update',
   templateUrl: './update.component.html',
   styleUrls: ['./update.component.scss']
@@ -22,6 +24,7 @@ export class UpdateComponent {
   public websiteUpdateProgress: number | null = null;
 
   public checkLatestRelease: boolean = false;
+  public ignoreReleaseCheckWarning: boolean = false;
   public latestRelease$: Observable<any>;
 
   public info$: Observable<any>;

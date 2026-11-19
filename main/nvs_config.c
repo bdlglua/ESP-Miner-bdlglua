@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <pthread.h>
 #include "display.h"
 #include "theme_api.h"
 
@@ -42,6 +43,9 @@ static const char * TAG = "nvs_config";
 
 static QueueHandle_t nvs_save_queue = NULL;
 static nvs_handle_t handle;
+// A returned string is an owned copy. Protect that copy (and comparisons)
+// against the save task replacing/freeing the cached string on another core.
+static pthread_mutex_t strings_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static Settings settings[NVS_CONFIG_COUNT] = {
     [NVS_CONFIG_WIFI_SSID]                             = {.nvs_key_name = "wifissid",        .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_ESP_WIFI_SSID},                .rest_name = "ssid",                               .min = 1,  .max = 32},
@@ -57,6 +61,7 @@ static Settings settings[NVS_CONFIG_COUNT] = {
     [NVS_CONFIG_STRATUM_TLS]                           = {.nvs_key_name = "stratumtls",      .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_STRATUM_TLS},                .rest_name = "stratumTLS",                         .min = 0,  .max = 3},
     [NVS_CONFIG_STRATUM_CERT]                          = {.nvs_key_name = "stratumcert",     .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_STRATUM_CERT},                 .rest_name = "stratumCert",                        .min = 0,  .max = NVS_STR_LIMIT},
     [NVS_CONFIG_STRATUM_DECODE_COINBASE]               = {.nvs_key_name = "stratumdecode",   .type = TYPE_BOOL,  .default_value = {.b   = true},                                        .rest_name = "stratumDecodeCoinbase",              .min = 0,  .max = 1},
+    [NVS_CONFIG_STRATUM_COIN] = {.nvs_key_name = "stratumcoin", .type = TYPE_U16, .default_value = {.u16 = 0}, .rest_name = "stratumCoin", .min = 0, .max = 3},
     [NVS_CONFIG_FALLBACK_STRATUM_URL]                  = {.nvs_key_name = "fbstratumurl",    .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_URL},         .rest_name = "fallbackStratumURL",                 .min = 0,  .max = NVS_STR_LIMIT},
     [NVS_CONFIG_FALLBACK_STRATUM_PORT]                 = {.nvs_key_name = "fbstratumport",   .type = TYPE_U16,   .default_value = {.u16 = CONFIG_FALLBACK_STRATUM_PORT},                .rest_name = "fallbackStratumPort",                .min = 0,  .max = UINT16_MAX},
     [NVS_CONFIG_FALLBACK_STRATUM_USER]                 = {.nvs_key_name = "fbstratumuser",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_USER},        .rest_name = "fallbackStratumUser",                .min = 0,  .max = NVS_STR_LIMIT},
@@ -66,6 +71,7 @@ static Settings settings[NVS_CONFIG_COUNT] = {
     [NVS_CONFIG_FALLBACK_STRATUM_TLS]                  = {.nvs_key_name = "fbstratumtls",    .type = TYPE_U16,   .default_value = {.u16 = (uint16_t)CONFIG_FALLBACK_STRATUM_TLS},       .rest_name = "fallbackStratumTLS",                 .min = 0,  .max = 3},
     [NVS_CONFIG_FALLBACK_STRATUM_CERT]                 = {.nvs_key_name = "fbstratumcert",   .type = TYPE_STR,   .default_value = {.str = (char *)CONFIG_FALLBACK_STRATUM_CERT},        .rest_name = "fallbackStratumCert",                .min = 0,  .max = NVS_STR_LIMIT},
     [NVS_CONFIG_FALLBACK_STRATUM_DECODE_COINBASE]      = {.nvs_key_name = "fbstratumdecode", .type = TYPE_BOOL,  .default_value = {.b   = true},                                        .rest_name = "fallbackStratumDecodeCoinbase",      .min = 0,  .max = 1},
+    [NVS_CONFIG_FALLBACK_STRATUM_COIN] = {.nvs_key_name = "fbstratumcoin", .type = TYPE_U16, .default_value = {.u16 = 0}, .rest_name = "fallbackStratumCoin", .min = 0, .max = 3},
     [NVS_CONFIG_USE_FALLBACK_STRATUM]                  = {.nvs_key_name = "usefbstartum",    .type = TYPE_BOOL,                                                                         .rest_name = "useFallbackStratum",                 .min = 0,  .max = 1},
 
     [NVS_CONFIG_ASIC_FREQUENCY]                        = {.nvs_key_name = "asicfrequency_f", .type = TYPE_FLOAT, .default_value = {.f   = CONFIG_ASIC_FREQUENCY},                       .rest_name = "frequency",                          .min = 1,  .max = UINT16_MAX},
@@ -165,13 +171,18 @@ static void nvs_task(void *pvParameters)
             Settings *setting = nvs_config_get_settings(update.key);
             if (setting && setting->type == update.type) {
                 esp_err_t ret = ESP_OK;
-                char *old_str = NULL;
                 switch (update.type) {
-                    case TYPE_STR:
-                        old_str = setting->value.str;
+                    case TYPE_STR: {
+                        pthread_mutex_lock(&strings_lock);
+                        char *old_str = setting->value.str;
                         setting->value.str = update.value.str;
-                        ret = nvs_set_str(handle, setting->nvs_key_name, setting->value.str);
+                        free(old_str);
+                        pthread_mutex_unlock(&strings_lock);
+                        // Only this task writes the cache; keep flash I/O outside
+                        // the lock so readers need not wait for a flash commit.
+                        ret = nvs_set_str(handle, setting->nvs_key_name, update.value.str);
                         break;
+                    }
                     case TYPE_U16:
                         setting->value.u16 = update.value.u16;
                         ret = nvs_set_u16(handle, setting->nvs_key_name, setting->value.u16);
@@ -204,7 +215,6 @@ static void nvs_task(void *pvParameters)
                         ESP_LOGE(TAG, "Failed to commit data to NVS");
                     }
                 }
-                if (old_str) free(old_str);
             } 
             else if (update.type == TYPE_STR) {
                 free(update.value.str);
@@ -300,17 +310,24 @@ char *nvs_config_get_string(NvsConfigKey key)
 {
     Settings *setting = nvs_config_get_settings(key);
     if (!setting || setting->type != TYPE_STR) {
-        ESP_LOGE(TAG, "Wrong type for %s (str)", setting->nvs_key_name);
+        ESP_LOGE(TAG, "Invalid string setting key %d", key);
         return NULL;
     }
-    return strdup(setting->value.str);
+    pthread_mutex_lock(&strings_lock);
+    char *copy = setting->value.str ? strdup(setting->value.str) : NULL;
+    pthread_mutex_unlock(&strings_lock);
+    return copy;
 }
 
 void nvs_config_set_string(NvsConfigKey key, const char *value)
 {
     Settings *setting = nvs_config_get_settings(key);
     // Skip if invalid, wrong type, or value unchanged
-    if (!setting || setting->type != TYPE_STR || (setting->value.str && strcmp(setting->value.str, value) == 0)) return;
+    if (!setting || setting->type != TYPE_STR || !value) return;
+    pthread_mutex_lock(&strings_lock);
+    bool unchanged = setting->value.str && strcmp(setting->value.str, value) == 0;
+    pthread_mutex_unlock(&strings_lock);
+    if (unchanged) return;
 
     ConfigUpdate update = { .key = key, .type = TYPE_STR, .value.str = strdup(value) };
     if (!update.value.str) return;

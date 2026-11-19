@@ -1,10 +1,12 @@
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { Observable, shareReplay } from 'rxjs';
 import { SystemApiService } from '../services/system.service';
 import { LayoutService } from './service/app.layout.service';
 import { SystemInfo as ISystemInfo } from 'src/app/generated';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-menu',
   templateUrl: './app.menu.component.html'
 })

@@ -1,22 +1,23 @@
 import { NgModule } from '@angular/core';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { ButtonModule } from 'primeng/button';
-import { ChartModule } from 'primeng/chart';
-import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
-import { FileUploadModule } from 'primeng/fileupload';
-import { InputGroupModule } from 'primeng/inputgroup';
-import { InputGroupAddonModule } from 'primeng/inputgroupaddon';
-import { InputTextModule } from 'primeng/inputtext';
-import { SidebarModule } from 'primeng/sidebar';
-import { SliderModule } from 'primeng/slider';
-import { InputTextareaModule } from 'primeng/inputtextarea';
+import { RadioButtonModule } from '@openng/optimus-ui/radiobutton';
+import { ButtonModule } from '@openng/optimus-ui/button';
+import { ChartModule } from '@openng/optimus-ui/chart';
+import { CheckboxModule } from '@openng/optimus-ui/checkbox';
+import { SelectModule } from '@openng/optimus-ui/select';
+import { FileUploadModule } from '@openng/optimus-ui/fileupload';
+import { InputGroupModule } from '@openng/optimus-ui/inputgroup';
+import { InputGroupAddonModule } from '@openng/optimus-ui/inputgroupaddon';
+import { InputTextModule } from '@openng/optimus-ui/inputtext';
+import { DrawerModule } from '@openng/optimus-ui/drawer';
+import { SliderModule } from '@openng/optimus-ui/slider';
+import { TextareaModule } from '@openng/optimus-ui/textarea';
+import { ProgressBarModule } from '@openng/optimus-ui/progressbar';
 
 const primeNgModules = [
-    SidebarModule,
+    DrawerModule,
     InputTextModule,
     CheckboxModule,
-    DropdownModule,
+    SelectModule,
     SliderModule,
     ButtonModule,
     FileUploadModule,
@@ -24,7 +25,8 @@ const primeNgModules = [
     InputGroupModule,
     InputGroupAddonModule,
     RadioButtonModule,
-    InputTextareaModule,
+    TextareaModule,
+    ProgressBarModule,
 ];
 
 @NgModule({

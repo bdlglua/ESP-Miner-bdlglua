@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, OnDestroy } from '@angular/core';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { LayoutService } from '../../layout/service/app.layout.service';
@@ -13,6 +13,8 @@ interface ThemeOption {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-theme-config',
   template: `
     <div class="card">
@@ -21,13 +23,13 @@ interface ThemeOption {
           <h5>Color Scheme</h5>
           <div class="flex gap-3">
             <div class="flex align-items-center">
-              <p-radioButton name="colorScheme" [value]="'dark'" [(ngModel)]="selectedScheme"
-                (onClick)="changeColorScheme('dark')" inputId="dark"></p-radioButton>
+              <p-radiobutton name="colorScheme" [value]="'dark'" [(ngModel)]="selectedScheme"
+                (onClick)="changeColorScheme('dark')" inputId="dark"></p-radiobutton>
               <label for="dark" class="ml-2">Dark</label>
             </div>
             <div class="flex align-items-center">
-              <p-radioButton name="colorScheme" [value]="'light'" [(ngModel)]="selectedScheme"
-                (onClick)="changeColorScheme('light')" inputId="light"></p-radioButton>
+              <p-radiobutton name="colorScheme" [value]="'light'" [(ngModel)]="selectedScheme"
+                (onClick)="changeColorScheme('light')" inputId="light"></p-radiobutton>
               <label for="light" class="ml-2">Light</label>
             </div>
           </div>

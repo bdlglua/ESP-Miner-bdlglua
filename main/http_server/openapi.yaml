@@ -24,6 +24,33 @@ components:
       properties:
         message:
           type: string
+    ZpoolJobHeader:
+      type: object
+      description: Current zpool SHA-256 job template. The chain and payout denomination are not inferred.
+      required: [jobId, previousBlockHash, version, bits, timestamp, difficulty]
+      properties:
+        jobId:
+          type: string
+        previousBlockHash:
+          type: string
+          description: Previous block hash in conventional display byte order
+          pattern: '^[0-9a-f]{64}$'
+        version:
+          type: string
+          pattern: '^[0-9a-f]{8}$'
+        bits:
+          type: string
+          description: Compact proof-of-work target
+          pattern: '^[0-9a-f]{8}$'
+        timestamp:
+          type: integer
+          format: int64
+          description: Template time in Unix seconds
+        difficulty:
+          type: number
+        height:
+          type: integer
+          description: Height from the first coinbase script push, when it can be read unambiguously
     SharesRejectedReason:
       type: object
       required:
@@ -240,6 +267,11 @@ components:
         fallbackStratumURL:
           type: string
           description: Fallback stratum server URL
+        fallbackStratumCoin:
+          type: integer
+          enum: [0, 1, 2, 3]
+          default: 0
+          description: "Fallback pool coin: 0 Auto, 1 BTC, 2 PPC, 3 DGB SHA-256d"
         fallbackStratumUser:
           type: string
           description: Fallback stratum username
@@ -389,6 +421,11 @@ components:
         stratumURL:
           type: string
           description: Primary stratum server URL
+        stratumCoin:
+          type: integer
+          enum: [0, 1, 2, 3]
+          default: 0
+          description: "Pool coin: 0 Auto (payout address), 1 BTC, 2 PPC, 3 DGB SHA-256d; use an explicit coin for account usernames"
         stratumUser:
           type: string
           description: Primary stratum username
@@ -443,6 +480,8 @@ components:
         networkDifficulty:
           type: number
           description: Current network difficulty
+        zpoolJobHeader:
+          $ref: '#/components/schemas/ZpoolJobHeader'
         blockFound:
           type: number
           description: Number of blocks found
@@ -467,10 +506,16 @@ components:
                 description: Output address
         coinbaseValueTotalSatoshis:
           type: integer
-          description: Total value of coinbase transaction in satoshis
+          description: Total coinbase value in atomic units; use coinbaseCurrency and coinbaseDecimals to format
         coinbaseValueUserSatoshis:
           type: integer
-          description: User's portion of coinbase value in satoshis
+          description: User's portion of coinbase value in atomic units
+        coinbaseCurrency:
+          type: string
+          description: Currency of decoded coinbase values (BTC, PPC or DGB); absent on older firmware
+        coinbaseDecimals:
+          type: integer
+          description: Decimals for decoded coinbase values (8 for BTC/DGB, 6 for PPC); absent on older firmware
         hashrateMonitor:
           type: object
           required:
@@ -582,6 +627,11 @@ components:
           description: Fallback stratum server URL used when primary is unavailable
           examples:
             - "stratum+tcp://backup.example.com"
+        stratumCoin:
+          type: integer
+          enum: [0, 1, 2, 3]
+          default: 0
+          description: "Pool coin: 0 Auto (payout address), 1 BTC, 2 PPC, 3 DGB SHA-256d; use an explicit coin for account usernames"
         stratumUser:
           type: string
           description: Username for primary stratum server
@@ -593,6 +643,11 @@ components:
           writeOnly: true
           examples:
             - "x"
+        fallbackStratumCoin:
+          type: integer
+          enum: [0, 1, 2, 3]
+          default: 0
+          description: "Fallback pool coin: 0 Auto, 1 BTC, 2 PPC, 3 DGB SHA-256d"
         fallbackStratumUser:
           type: string
           description: Username for fallback stratum server

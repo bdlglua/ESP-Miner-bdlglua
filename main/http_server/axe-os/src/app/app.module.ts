@@ -2,11 +2,10 @@ import 'chartjs-adapter-moment';
 
 import { CommonModule, HashLocationStrategy, LocationStrategy } from '@angular/common';
 import { provideHttpClient } from '@angular/common/http';
-import { NgModule } from '@angular/core';
+import { NgModule, provideZoneChangeDetection } from '@angular/core';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { BrowserModule } from '@angular/platform-browser';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
-import { ToastrModule } from 'ngx-toastr';
+import { ToastrModule } from '@openng/ngx-toastr';
 
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
@@ -36,10 +35,12 @@ import { DiffSuffixPipe } from './pipes/diff-suffix.pipe';
 import { AddressPipe } from './pipes/address.pipe';
 import { SatsPipe } from './pipes/sats.pipe';
 import { PrimeNGModule } from './prime-ng.module';
-import { MessageModule } from 'primeng/message';
-import { TooltipModule } from 'primeng/tooltip';
-import { DialogModule } from 'primeng/dialog';
-import { DialogService as PrimeDialogService } from 'primeng/dynamicdialog';
+import { MessageModule } from '@openng/optimus-ui/message';
+import { TooltipModule } from '@openng/optimus-ui/tooltip';
+import { DialogModule } from '@openng/optimus-ui/dialog';
+import { DialogService as PrimeDialogService } from '@openng/optimus-ui/dynamicdialog';
+import { provideOptimus } from '@openng/optimus-ui/config';
+import Aura from '@openng/optimus-ui-themes/aura';
 import { DialogService, DialogListComponent } from './services/dialog.service';
 
 const components = [
@@ -85,7 +86,6 @@ const components = [
     ToastrModule.forRoot({
       positionClass: 'toast-bottom-right'
     }),
-    BrowserAnimationsModule,
     CommonModule,
     PrimeNGModule,
     AppLayoutModule,
@@ -95,10 +95,14 @@ const components = [
     ApiModule.forRoot(() => new Configuration({ basePath: '' }))
   ],
   providers: [
+    // Existing components update plain fields from RxJS subscriptions.
+    // Keep their pre-migration scheduling with Zone.js and explicit Eager checks.
+    provideZoneChangeDetection(),
     { provide: LocationStrategy, useClass: HashLocationStrategy },
     DialogService,
     PrimeDialogService,
-    provideHttpClient()
+    provideHttpClient(),
+    provideOptimus({ theme: { preset: Aura, options: { darkModeSelector: ".app-dark", cssLayer: false } } })
   ],
   bootstrap: [AppComponent]
 })

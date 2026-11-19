@@ -67,6 +67,8 @@ typedef struct
     uint16_t fallback_pool_difficulty;
     bool pool_extranonce_subscribe;
     bool fallback_pool_extranonce_subscribe;
+    mining_network_t pool_coin;
+    mining_network_t fallback_pool_coin;
     bool pool_decode_coinbase;
     bool fallback_pool_decode_coinbase;
     float response_time;
@@ -150,7 +152,8 @@ typedef struct
     int coinbase_output_count;
     uint64_t coinbase_value_total_satoshis;
     uint64_t coinbase_value_user_satoshis;
-    uint64_t network_nonce_diff;
+    mining_network_t coinbase_network;
+    double network_nonce_diff;
     char network_diff_string[DIFF_STRING_SIZE];
 } GlobalState;
 

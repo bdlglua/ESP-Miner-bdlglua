@@ -15,13 +15,13 @@
                         </p>
                         <p class="flex gap-2">
                             <p-checkbox
+                                [(ngModel)]="ignoreReleaseCheckWarning"
                                 [binary]="true"
-                                inputId="ignoreWarning"
-                                #ignoreWarning></p-checkbox>
+                                inputId="ignoreWarning"></p-checkbox>
                             <label for="ignoreWarning">Don't show again</label>
                         </p>
                         <div class="flex gap-3 mt-5">
-                            <p-button (onClick)="continueReleaseCheck(ignoreWarning.model)">Continue</p-button>
+                            <p-button (onClick)="continueReleaseCheck(ignoreReleaseCheckWarning)">Continue</p-button>
                             <p-button styleClass="p-button-secondary" (onClick)="modalComponent.isVisible = false">Cancel</p-button>
                         </div>
                     </app-modal>
@@ -62,8 +62,8 @@
             <div class="card h-full">
                 <h3>Update AxeOS <span *ngIf="websiteUpdateProgress != null">{{websiteUpdateProgress}} %</span></h3>
 
-                <p-fileUpload #websiteUpload [customUpload]="true" mode="basic" accept=".bin" (uploadHandler)="otaWWWUpdate($event)"
-                    [auto]="true" chooseLabel="Browse"></p-fileUpload>
+                <p-fileupload #websiteUpload [customUpload]="true" mode="basic" accept=".bin" (uploadHandler)="otaWWWUpdate($event)"
+                    [auto]="true" chooseLabel="Browse"></p-fileupload>
 
                 <small>(www.bin)</small>
             </div>
@@ -71,8 +71,8 @@
         <div class="col-12 lg:col-6 xl:col-4">
             <div class="card h-full">
                 <h3>Update Firmware <span *ngIf="firmwareUpdateProgress != null">{{firmwareUpdateProgress}} %</span></h3>
-                <p-fileUpload #firmwareUpload [customUpload]="true" mode="basic" accept=".bin" (uploadHandler)="otaUpdate($event)"
-                    [auto]="true" chooseLabel="Browse"></p-fileUpload>
+                <p-fileupload #firmwareUpload [customUpload]="true" mode="basic" accept=".bin" (uploadHandler)="otaUpdate($event)"
+                    [auto]="true" chooseLabel="Browse"></p-fileupload>
 
                 <small>(esp-miner.bin)</small>
             </div>

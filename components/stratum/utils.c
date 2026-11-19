@@ -3,8 +3,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdbool.h>
 
-#include "mbedtls/sha256.h"
+#include "bitcoin_hash.h"
 
 #define HASH_CNT_LSB 0x100000000uLL // 2^32 hashes for difficulty 1
 
@@ -76,37 +77,22 @@ void double_sha256_bin(const uint8_t *data, const size_t data_len, uint8_t dest[
 {
     uint8_t first_hash_output[32];
 
-    mbedtls_sha256(data, data_len, first_hash_output, 0);
-    mbedtls_sha256(first_hash_output, 32, dest, 0);
+    sha256_digest(data, data_len, first_hash_output);
+    sha256_digest(first_hash_output, 32, dest);
 }
 
 void midstate_sha256_bin(const uint8_t *data, const size_t data_len, uint8_t dest[32])
 {
-    mbedtls_sha256_context ctx;
-
-    // Calculate midstate
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);
-    mbedtls_sha256_update(&ctx, data, 64);
-
-    memcpy(dest, ctx.state, 32);
-
-    mbedtls_sha256_free(&ctx);
+    (void)data_len; // A midstate always covers the first 64-byte header block.
+    sha256_midstate(data, dest);
 }
 
 void reverse_32bit_words(const uint8_t src[32], uint8_t dest[32])
 {
-    const uint32_t *s = (const uint32_t *)src;
-    uint32_t *d = (uint32_t *)dest;
-    
-    d[0] = s[7];
-    d[1] = s[6];
-    d[2] = s[5];
-    d[3] = s[4];
-    d[4] = s[3];
-    d[5] = s[2];
-    d[6] = s[1];
-    d[7] = s[0];    
+    // bm_job midstates follow a byte field and need not be word aligned.
+    for (int i = 0; i < 8; i++) {
+        memcpy(dest + i * 4, src + (7 - i) * 4, 4);
+    }
 }
 
 void reverse_endianness_per_word(uint8_t data[32])

@@ -2,9 +2,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { NetworkEditComponent } from './network.edit.component';
 import { provideHttpClient } from '@angular/common/http';
-import { provideToastr } from 'ngx-toastr';
+import { provideToastr } from '@openng/ngx-toastr';
 import { DialogService } from 'src/app/services/dialog.service';
-import { DialogService as PrimeDialogService } from 'primeng/dynamicdialog';
+import { DialogService as PrimeDialogService } from '@openng/optimus-ui/dynamicdialog';
 
 describe('NetworkEditComponent', () => {
   let component: NetworkEditComponent;

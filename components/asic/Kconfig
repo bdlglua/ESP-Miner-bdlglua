@@ -1,0 +1,46 @@
+menu "BM1370 Rust protocol experiment"
+    config BM1370_PROTOCOL_RUST
+        bool "Build the experimental bm13xx-protocol Rust adapter"
+        default n
+        depends on IDF_TARGET_ESP32S3
+        help
+            Use a pinned upstream bm13xx-protocol for BM1370 wire frames.
+            UART, initialization sequences, power and fan control stay in C.
+
+    config BM1370_PROTOCOL_SHADOW
+        bool "Compare C/Rust frames while sending and using C results"
+        depends on BM1370_PROTOCOL_RUST
+        default y
+        help
+            Check every encoded frame and decoded response against C. Counters
+            are logged periodically. Disable only after validating equivalence
+            to use the Rust adapter's bytes and decoded fields directly.
+
+    config BM1370_PROTOCOL_BENCHMARK
+        bool "Run the identical-frame C/old-Rust/Rust benchmark once"
+        depends on BM1370_PROTOCOL_RUST
+        default n
+        help
+            Starts after 60 seconds on core 1 at low priority. Logs nine
+            interleaved samples per case/backend, outside timed loops.
+            Excludes UART and mining work preparation. Diagnostic builds only.
+endmenu
+
+menu "BM1370 fixed-capacity jobs"
+    config BM1370_FIXED_JOBS
+        bool "Use the bounded Rust job book for BM1370"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            Keeps 16 jobs in 6212 static bytes, with owned result snapshots.
+            Job IDs over 256 bytes are rejected explicitly without truncation.
+            Other ASIC families keep their existing job storage.
+
+    config BM1370_JOBSTORE_TEST
+        bool "Diagnostic only: force two pool reconnects after 120/240 seconds"
+        depends on BM1370_FIXED_JOBS
+        default n
+        help
+            Exercises live job invalidation and pool reconnects once per boot.
+            Never enable in a production image.
+endmenu

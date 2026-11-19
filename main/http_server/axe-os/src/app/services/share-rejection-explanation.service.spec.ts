@@ -20,7 +20,7 @@ describe('ShareRejectionExplanationService', () => {
     
     const explanationMap = new Map<string, string>(filteredEntries);    
     for (const [key, expectedValue] of explanationMap) {
-      expect(service.getExplanation(key)).withContext(`Key: ${key}`).toBe(expectedValue);
+      expect(service.getExplanation(key), `Key: ${key}`).toBe(expectedValue);
     }
   });
 

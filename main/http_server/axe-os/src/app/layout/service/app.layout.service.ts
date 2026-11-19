@@ -1,4 +1,5 @@
 import { Injectable, effect, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { ThemeService } from '../../services/theme.service';
 import { LocalStorageService } from '../../local-storage.service';
@@ -85,24 +86,23 @@ export class LayoutService {
     overlayOpen$ = this.overlayOpen.asObservable();
 
     private staticMenuDesktopInactive$ = new BehaviorSubject<boolean>(this.state.staticMenuDesktopInactive);
+    private accentColors: Record<string, string> = {};
 
     constructor(
       private themeService: ThemeService,
       private localStorageService: LocalStorageService
     ) {
         // Load saved theme settings from NVS
-        this.themeService.getThemeSettings().subscribe(
+        this.themeService.getThemeSettings().pipe(takeUntilDestroyed()).subscribe(
             settings => {
                 if (settings) {
                     this._config = {
-                        ...this._config,
+                        ...this.config(),
                         colorScheme: settings.colorScheme,
                     };
                     // Apply accent colors if they exist
                     if (settings.accentColors) {
-                        Object.entries(settings.accentColors).forEach(([key, value]) => {
-                            document.documentElement.style.setProperty(key, value);
-                        });
+                        this.accentColors = { ...settings.accentColors };
                     }
                 } else {
                     // Save default red dark theme if no settings exist
@@ -204,23 +204,19 @@ export class LayoutService {
     changeTheme() {
         const config = this.config();
 
+        // Both AxeOS palettes use navy backgrounds. Match the component theme
+        // and PrimeFlex text utilities to those backgrounds.
+        document.documentElement.classList.add('app-dark');
+
         // Apply light/dark theme variables
         const themeVars = config.colorScheme === 'light' ? this.lightTheme : this.darkTheme;
         Object.entries(themeVars).forEach(([key, value]) => {
             document.documentElement.style.setProperty(key, value);
         });
 
-        // Load theme settings from NVS
-        this.themeService.getThemeSettings().subscribe(
-            settings => {
-                if (settings && settings.accentColors) {
-                    Object.entries(settings.accentColors).forEach(([key, value]) => {
-                        document.documentElement.style.setProperty(key, value);
-                    });
-                }
-            },
-            error => console.error('Error loading accent colors:', error)
-        );
+        Object.entries(this.accentColors).forEach(([key, value]) => {
+            document.documentElement.style.setProperty(key, value);
+        });
     }
 
     changeScale(value: number) {

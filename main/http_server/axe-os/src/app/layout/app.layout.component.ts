@@ -1,4 +1,4 @@
-import { Component, OnDestroy, Renderer2, ViewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, Renderer2, ViewChild } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import { filter, Subscription, Subject, takeUntil } from 'rxjs';
 import { SensitiveData } from 'src/app/services/sensitive-data.service';
@@ -7,7 +7,9 @@ import { AppSidebarComponent } from "./app.sidebar.component";
 import { AppTopBarComponent } from './app.topbar.component';
 
 @Component({
-    selector: 'app-layout',
+  changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+  selector: 'app-layout',
     templateUrl: './app.layout.component.html'
 })
 export class AppLayoutComponent implements OnDestroy {

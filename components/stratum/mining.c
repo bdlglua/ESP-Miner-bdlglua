@@ -1,9 +1,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
+#include <ctype.h>
+#include <stdlib.h>
 #include "mining.h"
 #include "utils.h"
-#include "mbedtls/sha256.h"
 #include "esp_log.h"
 
 void free_bm_job(bm_job *job)
@@ -46,6 +47,88 @@ void calculate_merkle_root_hash(const uint8_t coinbase_tx_hash[32], const uint8_
 }
 
 // take a mining_notify struct with ascii hex strings and convert it to a bm_job struct
+bool mining_prevhash_to_display(const char *stratum_prevhash, char display[65])
+{
+    display[0] = '\0';
+    if (!stratum_prevhash || strlen(stratum_prevhash) != 64 ||
+        strspn(stratum_prevhash, "0123456789abcdefABCDEF") != 64) return false;
+
+    uint8_t words[32], hash[32];
+    hex2bin(stratum_prevhash, words, sizeof(words));
+    reverse_32bit_words(words, hash);
+    return bin2hex(hash, sizeof(hash), display, 65) == 64;
+}
+
+struct bm1370_work_template {
+    size_t coinbase_size, extra2_offset;
+    uint8_t prev_hash[32];
+    uint8_t coinbase[];
+};
+
+static bool decode_work_hex(const char *hex, size_t digits, uint8_t *out)
+{
+    if (digits % 2) return false;
+    for (size_t i = 0; i < digits; ++i) {
+        if (!isxdigit((unsigned char)hex[i])) return false;
+    }
+    return hex2bin(hex, out, digits / 2) == digits / 2;
+}
+
+bool mining_prepare_bm1370_work(mining_notify *n)
+{
+    if (n->work_template) return true;
+    if (!n->prev_block_hash || !n->coinbase_1 || !n->coinbase_2 || !n->work_extranonce1 ||
+        strlen(n->prev_block_hash) != 64 || n->work_extranonce2_len < 0 ||
+        n->work_extranonce2_len > MAX_EXTRANONCE_2_LEN) return false;
+    size_t first = strlen(n->coinbase_1), extra1 = strlen(n->work_extranonce1), last = strlen(n->coinbase_2);
+    size_t extra2 = n->work_extranonce2_len;
+    size_t offset = first / 2 + extra1 / 2;
+    size_t size = offset + extra2 + last / 2;
+    struct bm1370_work_template *work = malloc(sizeof(*work) + size);
+    if (!work) return false;
+    uint8_t raw_hash[32];
+    if (!decode_work_hex(n->prev_block_hash, 64, raw_hash) ||
+        !decode_work_hex(n->coinbase_1, first, work->coinbase) ||
+        !decode_work_hex(n->work_extranonce1, extra1, work->coinbase + first / 2) ||
+        !decode_work_hex(n->coinbase_2, last, work->coinbase + offset + extra2)) {
+        free(work);
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(raw_hash); ++i) work->prev_hash[i] = raw_hash[31 - i];
+    work->coinbase_size = size;
+    work->extra2_offset = offset;
+    n->work_template = work;
+    return true;
+}
+
+void mining_build_bm1370_job(const mining_notify *n, uint64_t counter,
+                            char extranonce_hex[2 * MAX_EXTRANONCE_2_LEN + 1], bm_job *job)
+{
+    struct bm1370_work_template *work = n->work_template;
+    size_t length = n->work_extranonce2_len;
+    uint8_t *extra2 = work->coinbase + work->extra2_offset;
+    for (size_t i = 0; i < length; ++i) {
+        extra2[i] = (uint8_t)counter;
+        counter >>= 8;
+    }
+    bin2hex(extra2, length, extranonce_hex, 2 * MAX_EXTRANONCE_2_LEN + 1);
+
+    uint8_t tx_hash[32], merkle[32];
+    double_sha256_bin(work->coinbase, work->coinbase_size, tx_hash);
+    calculate_merkle_root_hash(tx_hash, (const uint8_t (*)[32])n->merkle_branches, n->n_merkle_branches, merkle);
+
+    // BM1370 sends the complete header fields to the ASIC. Only older
+    // chips consume CPU-computed midstates, so keep those on the legacy path.
+    *job = (bm_job) {
+        .version = n->version, .target = n->target, .ntime = n->ntime,
+        .pool_diff = n->work_difficulty, .version_mask = n->work_version_mask,
+        .jobid = n->job_id, .extranonce2 = extranonce_hex, .work_epoch = n->work_epoch,
+        .num_midstates = 1,
+    };
+    memcpy(job->prev_block_hash, work->prev_hash, sizeof(job->prev_block_hash));
+    reverse_32bit_words(merkle, job->merkle_root);
+}
+
 void construct_bm_job(mining_notify *params, const uint8_t merkle_root[32], const uint32_t version_mask, const uint32_t difficulty, bm_job *new_job)
 {
     new_job->version = params->version;
@@ -99,7 +182,11 @@ void construct_bm_job(mining_notify *params, const uint8_t merkle_root[32], cons
 void extranonce_2_generate(uint64_t extranonce_2, uint32_t length, char dest[static length * 2 + 1])
 {
     // Allocate buffer to hold the extranonce_2 value in bytes
-    uint8_t extranonce_2_bytes[length];
+    uint8_t extranonce_2_bytes[MAX_EXTRANONCE_2_LEN];
+    if (length > sizeof(extranonce_2_bytes)) {
+        dest[0] = '\0';
+        return;
+    }
     memset(extranonce_2_bytes, 0, length);
     
     // Copy the extranonce_2 value into the buffer, handling endianness
@@ -117,10 +204,8 @@ void extranonce_2_generate(uint64_t extranonce_2, uint32_t length, char dest[sta
 static const double truediffone = 26959535291011309493156476344723991336010898738574164086137773096960.0;
 
 /* testing a nonce and return the diff - 0 means invalid */
-double test_nonce_value(const bm_job *job, const uint32_t nonce, const uint32_t rolled_version)
+void bm_job_to_header(const bm_job *job, uint32_t nonce, uint32_t rolled_version, uint8_t header[80])
 {
-    uint8_t header[80];
-
     // // TODO: use the midstate hash instead of hashing the whole header
     // uint32_t rolled_version = job->version;
     // for (int i = 0; i < midstate_index; i++) {
@@ -134,6 +219,12 @@ double test_nonce_value(const bm_job *job, const uint32_t nonce, const uint32_t 
     memcpy(header + 68, &job->ntime, 4);
     memcpy(header + 72, &job->target, 4);
     memcpy(header + 76, &nonce, 4);
+}
+
+double test_nonce_value(const bm_job *job, const uint32_t nonce, const uint32_t rolled_version)
+{
+    uint8_t header[80];
+    bm_job_to_header(job, nonce, rolled_version, header);
 
     uint8_t hash_result[32];
     double_sha256_bin(header, 80, hash_result);

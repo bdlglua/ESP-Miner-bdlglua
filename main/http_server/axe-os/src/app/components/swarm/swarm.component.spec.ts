@@ -2,11 +2,11 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { SwarmComponent } from './swarm.component';
 import { ModalComponent } from '../modal/modal.component';
-import { FileUploadModule } from 'primeng/fileupload';
-import { InputGroupModule } from 'primeng/inputgroup';
+import { FileUploadModule } from '@openng/optimus-ui/fileupload';
+import { InputGroupModule } from '@openng/optimus-ui/inputgroup';
 import { ReactiveFormsModule } from '@angular/forms';
 import { provideHttpClient } from '@angular/common/http';
-import { provideToastr } from 'ngx-toastr';
+import { provideToastr } from '@openng/ngx-toastr';
 
 describe('SwarmComponent', () => {
   let component: SwarmComponent;

@@ -1,13 +1,15 @@
-import { Component, ElementRef, Input, ViewChild, OnInit, OnDestroy } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Input, ViewChild, OnInit, OnDestroy } from '@angular/core';
 import { Observable, shareReplay, Subject, takeUntil } from 'rxjs';
-import { ToastrService } from 'ngx-toastr';
+import { ToastrService } from '@openng/ngx-toastr';
 import { SystemApiService } from 'src/app/services/system.service';
 import { LayoutService } from './service/app.layout.service';
 import { SensitiveData } from 'src/app/services/sensitive-data.service';
 import { SystemInfo as ISystemInfo } from 'src/app/generated';
-import { MenuItem } from 'primeng/api';
+import { MenuItem } from '@openng/optimus-ui/api';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-topbar',
   templateUrl: './app.topbar.component.html'
 })

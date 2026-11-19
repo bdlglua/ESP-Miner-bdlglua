@@ -1,8 +1,10 @@
-import { Component, ElementRef } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef } from '@angular/core';
 import { LayoutService } from "./service/app.layout.service";
 
 @Component({
-    selector: 'app-sidebar',
+  changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+  selector: 'app-sidebar',
     templateUrl: './app.sidebar.component.html'
 })
 export class AppSidebarComponent {

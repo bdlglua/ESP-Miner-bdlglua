@@ -1,0 +1,54 @@
+/**
+ * @license
+ * Copyright Google LLC All Rights Reserved.
+ *
+ * Use of this source code is governed by an MIT-style license that can be
+ * found in the LICENSE file at https://angular.dev/license
+ */
+import { ArrowFunction, ASTWithSource, Call, Chain, Conditional, ParsedEventType, SafeCall, TmplAstBoundEvent, } from '@angular/compiler';
+import { ErrorCode } from '../../error_code.js';
+import { TemplateCheckWithVisitor } from '../api.js';
+/**
+ * Ensures that functions in event bindings are called.
+ *
+ * Mirrors `UninvokedFunctionInEventBindingSpec` in
+ * `ngtsc/typecheck/extended/checks/uninvoked_function_in_event_binding/index.ts`.
+ *
+ * TODO: Implement the `PropertyRead` / `SafePropertyRead` call-signature check in NG8111, which
+ * requires `ts.TypeChecker` (`type.getCallSignatures()`).
+ */
+class UninvokedFunctionInEventBindingSpec extends TemplateCheckWithVisitor {
+    code = ErrorCode.UNINVOKED_FUNCTION_IN_EVENT_BINDING;
+    visitNode(ctx, component, node) {
+        if (!(node instanceof TmplAstBoundEvent))
+            return [];
+        if (node.type !== ParsedEventType.Regular && node.type !== ParsedEventType.LegacyAnimation) {
+            return [];
+        }
+        if (!(node.handler instanceof ASTWithSource))
+            return [];
+        if (node.handler.ast instanceof Chain) {
+            return node.handler.ast.expressions.flatMap((expression) => assertExpressionInvoked(expression, component, node, ctx));
+        }
+        if (node.handler.ast instanceof Conditional) {
+            const { trueExp, falseExp } = node.handler.ast;
+            return [trueExp, falseExp].flatMap((expression) => assertExpressionInvoked(expression, component, node, ctx));
+        }
+        return assertExpressionInvoked(node.handler.ast, component, node, ctx);
+    }
+}
+function assertExpressionInvoked(expression, _component, node, ctx) {
+    if (expression instanceof Call || expression instanceof SafeCall) {
+        return [];
+    }
+    if (expression instanceof ArrowFunction) {
+        const errorString = 'Arrow function will not be invoked in this event listener. Did you intend to call a method?';
+        return [ctx.makeTemplateDiagnostic(node.sourceSpan, errorString)];
+    }
+    return [];
+}
+export const factory = {
+    code: ErrorCode.UNINVOKED_FUNCTION_IN_EVENT_BINDING,
+    name: 'uninvokedFunctionInEventBinding',
+    create: () => new UninvokedFunctionInEventBindingSpec(),
+};

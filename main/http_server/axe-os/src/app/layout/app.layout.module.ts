@@ -2,15 +2,14 @@ import { HttpClientModule } from '@angular/common/http';
 import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BrowserModule } from '@angular/platform-browser';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { RouterModule } from '@angular/router';
-import { BadgeModule } from 'primeng/badge';
-import { InputSwitchModule } from 'primeng/inputswitch';
-import { InputTextModule } from 'primeng/inputtext';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { RippleModule } from 'primeng/ripple';
-import { SidebarModule } from 'primeng/sidebar';
-import { TooltipModule } from 'primeng/tooltip';
+import { BadgeModule } from '@openng/optimus-ui/badge';
+import { ToggleSwitchModule } from '@openng/optimus-ui/toggleswitch';
+import { InputTextModule } from '@openng/optimus-ui/inputtext';
+import { RadioButtonModule } from '@openng/optimus-ui/radiobutton';
+import { RippleModule } from '@openng/optimus-ui/ripple';
+import { DrawerModule } from '@openng/optimus-ui/drawer';
+import { TooltipModule } from '@openng/optimus-ui/tooltip';
 import { PrimeNGModule } from '../prime-ng.module';
 import { AppFooterComponent } from './app.footer.component';
 import { AppLayoutComponent } from './app.layout.component';
@@ -36,12 +35,11 @@ import { WifiIconComponent } from '../components/wifi-icon/wifi-icon.component';
         BrowserModule,
         FormsModule,
         HttpClientModule,
-        BrowserAnimationsModule,
         InputTextModule,
-        SidebarModule,
+        DrawerModule,
         BadgeModule,
         RadioButtonModule,
-        InputSwitchModule,
+        ToggleSwitchModule,
         RippleModule,
         RouterModule,
         PrimeNGModule,

@@ -1,3 +1,43 @@
+.logs-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem;
+}
+
+.logs-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    max-width: 100%;
+    gap: .5rem;
+    p-button {
+        flex: none;
+    }
+}
+
+.logs-filter {
+    position: relative;
+    flex: 1 1 8rem;
+    min-width: 0;
+
+    input {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        padding-inline-start: 2.25rem;
+    }
+
+    i {
+        position: absolute;
+        inset-inline-start: .75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: var(--text-color-secondary);
+    }
+}
+
 #logs {
     height: calc(100svh - 4rem - 10rem - 4rem - 4px); // padding + height + border
     border: 1px solid #304562;

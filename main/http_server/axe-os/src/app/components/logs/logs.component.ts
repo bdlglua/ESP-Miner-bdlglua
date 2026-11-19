@@ -1,10 +1,12 @@
-import { AfterViewChecked, Component, Input, OnInit, ElementRef, OnDestroy, ViewChild, HostListener } from '@angular/core';
+import { ChangeDetectionStrategy, AfterViewChecked, Component, Input, OnInit, ElementRef, OnDestroy, ViewChild, HostListener } from '@angular/core';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
-import { ToastrService } from 'ngx-toastr';
+import { ToastrService } from '@openng/ngx-toastr';
 import { WebsocketService } from 'src/app/services/web-socket.service';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-logs',
   templateUrl: './logs.component.html',
   styleUrl: './logs.component.scss'
@@ -23,7 +25,7 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
 
-  @HostListener('document:keydown.esc', ['$event'])
+  @HostListener('document:keydown.esc')
   onEscKey() {
     if (this.isExpanded) {
       this.isExpanded = false;

@@ -24,21 +24,27 @@ int log_to_queue(const char *format, va_list args)
     va_list args_copy;
     va_copy(args_copy, args);
 
-    // Calculate the required buffer size +1 for \n
-    int needed_size = vsnprintf(NULL, 0, format, args_copy) + 1;
+    int formatted_size = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
+    if (formatted_size < 0) return formatted_size;
+    // Reserve both an optional newline and the terminating NUL.
+    size_t needed_size = (size_t)formatted_size + 2;
 
     // Allocate the buffer dynamically
     char *log_buffer = (char *)calloc(needed_size, sizeof(char));
     if (log_buffer == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for log buffer");
-        return 0;
+        // This is the ESP log sink: logging its own failure would recurse.
+        return vprintf(format, args);
     }
 
     // Format the string into the allocated buffer
     va_copy(args_copy, args);
-    vsnprintf(log_buffer, needed_size, format, args_copy);
+    int written = vsnprintf(log_buffer, needed_size - 1, format, args_copy);
     va_end(args_copy);
+    if (written < 0) {
+        free(log_buffer);
+        return written;
+    }
 
     // Ensure the log message ends with a newline
     size_t len = strlen(log_buffer);
@@ -51,12 +57,13 @@ int log_to_queue(const char *format, va_list args)
     fputs(log_buffer, stdout);
 
     // Send to queue for WebSocket broadcasting
-    if (xQueueSendToBack(log_queue, &log_buffer, pdMS_TO_TICKS(100)) != pdPASS) {
-        ESP_LOGW(TAG, "Failed to send log to queue, freeing buffer");
+    if (!log_queue || xQueueSendToBack(log_queue, &log_buffer, 0) != pdPASS) {
+        // A full diagnostic queue must neither recurse nor stall mining tasks.
+        // The line has already been written to the serial console.
         free(log_buffer);
     }
 
-    return 0;
+    return written;
 }
 
 static esp_err_t add_client(int fd)

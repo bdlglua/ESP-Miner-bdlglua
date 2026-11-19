@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <limits.h>
+#include <inttypes.h>
 #include <math.h>
 #include <sys/param.h>
 #include <sys/stat.h>
@@ -46,6 +47,8 @@
 #include "http_server.h"
 #include "system.h"
 #include "websocket.h"
+#include "miner_diagnostics.h"
+#include "stratum_task.h"
 
 static const char * TAG = "http_server";
 static const char * CORS_TAG = "CORS";
@@ -127,6 +130,7 @@ static httpd_handle_t server = NULL;
 esp_err_t HTTP_send_json(httpd_req_t * req, const cJSON * item, int * prebuffer_len)
 {
     const char * response = cJSON_PrintBuffered(item, *prebuffer_len, true);
+    if (!response) return httpd_resp_send_500(req);
     int len = strlen(response);
     esp_err_t res = httpd_resp_send(req, response, len);
     if (len > *prebuffer_len) *prebuffer_len = len * 1.2;
@@ -459,13 +463,20 @@ static esp_err_t rest_common_get_handler(httpd_req_t * req)
         httpd_resp_set_status(req, "302 Temporary Redirect");
         // Redirect to the "/" root directory
         httpd_resp_set_hdr(req, "Location", "/");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         // iOS requires content in the response to detect a captive portal, simply redirecting is not sufficient.
         httpd_resp_send(req, "Redirect to the captive portal", HTTPD_RESP_USE_STRLEN);
 
         ESP_LOGI(TAG, "Redirecting to root");
         return ESP_OK;
     }
-    if (req->uri[strlen(req->uri) - 1] != '/') {
+    // Re-fetch the entry document and version metadata after an OTA update.
+    // Hashed JS/CSS assets can keep their long-lived cache entries.
+    const char *base_name = strrchr(filepath, '/');
+    if (CHECK_FILE_EXTENSION(filepath, ".html") ||
+        (base_name && strcmp(base_name + 1, "version.txt") == 0)) {
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    } else {
         httpd_resp_set_hdr(req, "Cache-Control", "max-age=2592000");
     }
 
@@ -549,6 +560,10 @@ bool check_settings_and_update(const cJSON * const root)
                 if (!cJSON_IsNumber(item)) {
                     ESP_LOGW(TAG, "Invalid type for '%s', expected number", setting->rest_name);                            
                     result = false;
+                } else if ((key == NVS_CONFIG_STRATUM_COIN || key == NVS_CONFIG_FALLBACK_STRATUM_COIN) &&
+                           item->valuedouble != item->valueint) {
+                    ESP_LOGW(TAG, "Coin selection must be an integer");
+                    result = false;
                 } else if ((item->valueint < setting->min) || (item->valueint > setting->max)) {
                     ESP_LOGW(TAG, "Value '%d' for '%s' is out of range", item->valueint, setting->rest_name);
                     result = false;
@@ -587,7 +602,7 @@ bool check_settings_and_update(const cJSON * const root)
             }
         }
 
-        if (key == NVS_CONFIG_DISPLAY && get_display_config(item->valuestring) == NULL) {
+        if (key == NVS_CONFIG_DISPLAY && (!cJSON_IsString(item) || get_display_config(item->valuestring) == NULL)) {
             ESP_LOGW(TAG, "Invalid display config: '%s'", item->valuestring);
             result = false;
         }
@@ -751,6 +766,7 @@ static esp_err_t POST_restart(httpd_req_t * req)
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     // Restart the system
+    incidents_mark_restart(false);
     esp_restart();
 
     // This return statement will never be reached, but it's good practice to include it
@@ -792,27 +808,28 @@ static esp_err_t POST_dismiss_block_found(httpd_req_t * req)
     return res;
 }
 
-static const char* esp_reset_reason_to_string(esp_reset_reason_t reason) {
-    switch (reason) {
-        case ESP_RST_UNKNOWN:    return "Reset reason can not be determined";
-        case ESP_RST_POWERON:    return "Reset due to power-on event";
-        case ESP_RST_EXT:        return "Reset by external pin (not applicable for ESP32)";
-        case ESP_RST_SW:         return "Software reset via esp_restart";
-        case ESP_RST_PANIC:      return "Software reset due to exception/panic";
-        case ESP_RST_INT_WDT:    return "Reset (software or hardware) due to interrupt watchdog";
-        case ESP_RST_TASK_WDT:   return "Reset due to task watchdog";
-        case ESP_RST_WDT:        return "Reset due to other watchdogs";
-        case ESP_RST_DEEPSLEEP:  return "Reset after exiting deep sleep mode";
-        case ESP_RST_BROWNOUT:   return "Brownout reset (software or hardware)";
-        case ESP_RST_SDIO:       return "Reset over SDIO";
-        case ESP_RST_USB:        return "Reset by USB peripheral";
-        case ESP_RST_JTAG:       return "Reset by JTAG";
-        case ESP_RST_EFUSE:      return "Reset due to efuse error";
-        case ESP_RST_PWR_GLITCH: return "Reset due to power glitch detected";
-        case ESP_RST_CPU_LOCKUP: return "Reset due to CPU lock up (double exception)";
-        default:                 return "Unknown reset";
+static esp_err_t send_diagnostics(httpd_req_t *req, bool incidents)
+{
+    if (is_network_allowed(req) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
     }
+    if (set_cors_headers(req) != ESP_OK) return httpd_resp_send_500(req);
+
+    const SystemModule *module = &GLOBAL_STATE->SYSTEM_MODULE;
+    cJSON *body = incidents ? incidents_json() : pool_stats_json(
+        module->pool_url, module->pool_port, module->fallback_pool_url, module->fallback_pool_port);
+    if (!body) return httpd_resp_send_500(req);
+
+    static int prebuffer[2] = {1024, 1024};
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t result = HTTP_send_json(req, body, &prebuffer[incidents]);
+    cJSON_Delete(body);
+    return result;
 }
+
+static esp_err_t GET_incidents(httpd_req_t *req) { return send_diagnostics(req, true); }
+static esp_err_t GET_pool_stats(httpd_req_t *req) { return send_diagnostics(req, false); }
 
 /* Simple handler for getting system handler */
 static esp_err_t GET_system_info(httpd_req_t * req)
@@ -909,6 +926,7 @@ static esp_err_t GET_system_info(httpd_req_t * req)
     cJSON_AddStringToObject(root, "stratumURL", stratumURL);
     cJSON_AddNumberToObject(root, "stratumPort", nvs_config_get_u16(NVS_CONFIG_STRATUM_PORT));
     cJSON_AddStringToObject(root, "stratumUser", stratumUser);
+    cJSON_AddNumberToObject(root, "stratumCoin", nvs_config_get_u16(NVS_CONFIG_STRATUM_COIN));
     cJSON_AddNumberToObject(root, "stratumSuggestedDifficulty", nvs_config_get_u16(NVS_CONFIG_STRATUM_DIFFICULTY));
     cJSON_AddNumberToObject(root, "stratumExtranonceSubscribe", nvs_config_get_bool(NVS_CONFIG_STRATUM_EXTRANONCE_SUBSCRIBE));
     cJSON_AddNumberToObject(root, "stratumTLS", nvs_config_get_u16(NVS_CONFIG_STRATUM_TLS));
@@ -917,6 +935,7 @@ static esp_err_t GET_system_info(httpd_req_t * req)
     cJSON_AddStringToObject(root, "fallbackStratumURL", fallbackStratumURL);
     cJSON_AddNumberToObject(root, "fallbackStratumPort", nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_PORT));
     cJSON_AddStringToObject(root, "fallbackStratumUser", fallbackStratumUser);
+    cJSON_AddNumberToObject(root, "fallbackStratumCoin", nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_COIN));
     cJSON_AddNumberToObject(root, "fallbackStratumSuggestedDifficulty", nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_DIFFICULTY));
     cJSON_AddNumberToObject(root, "fallbackStratumExtranonceSubscribe", nvs_config_get_bool(NVS_CONFIG_FALLBACK_STRATUM_EXTRANONCE_SUBSCRIBE));
     cJSON_AddNumberToObject(root, "fallbackStratumTLS", nvs_config_get_u16(NVS_CONFIG_FALLBACK_STRATUM_TLS));
@@ -929,7 +948,7 @@ static esp_err_t GET_system_info(httpd_req_t * req)
 
     cJSON_AddStringToObject(root, "idfVersion", esp_get_idf_version());
     cJSON_AddStringToObject(root, "boardVersion", GLOBAL_STATE->DEVICE_CONFIG.board_version);
-    cJSON_AddStringToObject(root, "resetReason", esp_reset_reason_to_string(esp_reset_reason()));
+    cJSON_AddStringToObject(root, "resetReason", miner_reset_reason(esp_reset_reason()));
     cJSON_AddStringToObject(root, "runningPartition", esp_ota_get_running_partition()->label);
 
     cJSON_AddNumberToObject(root, "overheat_mode", nvs_config_get_bool(NVS_CONFIG_OVERHEAT_MODE));
@@ -957,10 +976,31 @@ static esp_err_t GET_system_info(httpd_req_t * req)
         cJSON_AddStringToObject(root, "power_fault", VCORE_get_fault_string(GLOBAL_STATE));
     }
 
+    if (GLOBAL_STATE->network_nonce_diff > 0) {
+        cJSON_AddNumberToObject(root, "networkDifficulty", GLOBAL_STATE->network_nonce_diff);
+    }
+    zpool_job_header_t job_header;
+    if (stratum_get_zpool_job_header(&job_header)) {
+        cJSON *job = cJSON_AddObjectToObject(root, "zpoolJobHeader");
+        if (job) {
+            char hex[9];
+            cJSON_AddStringToObject(job, "jobId", job_header.job_id);
+            cJSON_AddStringToObject(job, "previousBlockHash", job_header.previous_block_hash);
+            snprintf(hex, sizeof(hex), "%08" PRIx32, job_header.version);
+            cJSON_AddStringToObject(job, "version", hex);
+            snprintf(hex, sizeof(hex), "%08" PRIx32, job_header.bits);
+            cJSON_AddStringToObject(job, "bits", hex);
+            cJSON_AddNumberToObject(job, "timestamp", job_header.timestamp);
+            cJSON_AddNumberToObject(job, "difficulty", job_header.difficulty);
+            if (job_header.height > 0) cJSON_AddNumberToObject(job, "height", job_header.height);
+        }
+    }
     if (GLOBAL_STATE->block_height > 0) {
         cJSON_AddNumberToObject(root, "blockHeight", GLOBAL_STATE->block_height);
         cJSON_AddStringToObject(root, "scriptsig", GLOBAL_STATE->scriptsig);
-        cJSON_AddNumberToObject(root, "networkDifficulty", GLOBAL_STATE->network_nonce_diff);
+        const mining_network_params_t *coin = mining_network_params(GLOBAL_STATE->coinbase_network);
+        cJSON_AddStringToObject(root, "coinbaseCurrency", coin->symbol);
+        cJSON_AddNumberToObject(root, "coinbaseDecimals", coin->decimals);
 
         cJSON *outputs_array = cJSON_CreateArray();
         for (int i = 0; i < GLOBAL_STATE->coinbase_output_count; i++) {
@@ -1260,6 +1300,7 @@ esp_err_t POST_OTA_update(httpd_req_t * req)
     httpd_resp_sendstr(req, "Firmware update complete, rebooting now!\n");
     ESP_LOGI(TAG, "Restarting System because of Firmware update complete");
     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    incidents_mark_restart(true);
     esp_restart();
 
     return ESP_OK;
@@ -1303,9 +1344,11 @@ esp_err_t start_rest_server(void * pvParameters)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8192;
     config.max_open_sockets = 20;
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 26;
     config.close_fn = websocket_close_fn;
     config.lru_purge_enable = true;
+    // Detect dead clients (closed tab, sleeping phone) and free their sockets.
+    config.keep_alive_enable = true;
 
     ESP_LOGI(TAG, "Starting HTTP Server");
     REST_CHECK(httpd_start(&server, &config) == ESP_OK, "Start server failed", err_start);
@@ -1337,6 +1380,15 @@ esp_err_t start_rest_server(void * pvParameters)
         .user_ctx = rest_context
     };
     httpd_register_uri_handler(server, &system_info_get_uri);
+
+    const httpd_uri_t incident_route = {
+        .uri = "/api/system/incidents", .method = HTTP_GET, .handler = GET_incidents,
+    };
+    const httpd_uri_t pool_stats_route = {
+        .uri = "/api/system/pools", .method = HTTP_GET, .handler = GET_pool_stats,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &incident_route));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &pool_stats_route));
 
     /* URI handler for fetching system asic values */
     httpd_uri_t system_asic_get_uri = {
@@ -1424,7 +1476,10 @@ esp_err_t start_rest_server(void * pvParameters)
         .method = HTTP_GET, 
         .handler = websocket_handler, 
         .user_ctx = NULL, 
-        .is_websocket = true
+        .is_websocket = true,
+        // ESP-IDF >= 6.0.1 no longer calls the handler for the handshake; this
+        // restores the HTTP_GET call that registers each log client.
+        .ws_post_handshake_cb = websocket_handler,
     };
     httpd_register_uri_handler(server, &ws);
 

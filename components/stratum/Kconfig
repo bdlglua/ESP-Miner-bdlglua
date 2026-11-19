@@ -1,0 +1,26 @@
+menu "Coinbase decoder experiments"
+    config COINBASE_RUST
+        bool "Use experimental Rust coinbase reader"
+        default n
+        depends on IDF_TARGET_ESP32S3
+        help
+            Replace only binary transaction parsing with the allocation-free
+            Rust reader. Address codecs and all other firmware stay in C.
+            Requires the axeos-esp Rust toolchain; see tools/RUST_COINBASE_FR.md.
+
+    config COINBASE_PROFILE
+        bool "Log coinbase decoding time and memory"
+        default n
+        help
+            Log one measurement per notification, after the timed section.
+            Includes hex conversion, parsing and optional address decoding.
+            Diagnostic builds only: serial logging itself affects scheduling.
+
+    config MINING_WORK_PROFILE
+        bool "Log work preparation and ASIC dispatch time"
+        default n
+        help
+            Measure each generate_work attempt, including coinbase/Merkle
+            hashing, job allocation and ASIC dispatch. Logs are emitted after
+            timing. These are wall times, not isolated CPU utilization.
+endmenu

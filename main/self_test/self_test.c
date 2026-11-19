@@ -25,6 +25,9 @@
 #include "vcore.h"
 
 #include "asic.h"
+#if CONFIG_BM1370_FIXED_JOBS
+#include "bm1370_jobs.h"
+#endif
 #include "asic_reset.h"
 #include "bm1366.h"
 #include "bm1368.h"
@@ -375,17 +378,26 @@ bool self_test(void * pvParameters)
         tests_done(GLOBAL_STATE, false);
     }
 
-    GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = malloc(sizeof(bm_job *) * 128);
-    GLOBAL_STATE->valid_jobs = malloc(sizeof(uint8_t) * 128);
+    if (!ASIC_uses_fixed_jobs(GLOBAL_STATE)) {
+        GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = malloc(sizeof(bm_job *) * 128);
+        GLOBAL_STATE->valid_jobs = malloc(sizeof(uint8_t) * 128);
 
-    for (int i = 0; i < 128; i++) {
-        GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[i] = NULL;
-        GLOBAL_STATE->valid_jobs[i] = 0;
+        for (int i = 0; i < 128; i++) {
+            GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[i] = NULL;
+            GLOBAL_STATE->valid_jobs[i] = 0;
+        }
     }
+#if CONFIG_BM1370_FIXED_JOBS
+    else {
+        bm1370_jobs_lock();
+        bm1370_jobs_clear_locked("self_test");
+        bm1370_jobs_unlock();
+    }
+#endif
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-    mining_notify notify_message;
+    mining_notify notify_message = {0};
     notify_message.job_id = 0;
     notify_message.prev_block_hash = "0c859545a3498373a57452fac22eb7113df2a465000543520000000000000000";
     notify_message.version = 0x20000004;
@@ -426,6 +438,16 @@ bool self_test(void * pvParameters)
 
     bm_job base_job = {0};
     construct_bm_job(&notify_message, merkle_root, 0x1fffe000, 1000000, &base_job);
+    base_job.version_mask = 0x1fffe000;
+#if CONFIG_BM1370_FIXED_JOBS
+    if (ASIC_uses_fixed_jobs(GLOBAL_STATE)) {
+        bm1370_jobs_lock();
+        base_job.work_epoch = bm1370_jobs_epoch_locked();
+        bm1370_jobs_unlock();
+        base_job.jobid = "self-test";
+        base_job.extranonce2 = extranonce_2_str;
+    }
+#endif
     bm_job * job = NULL;
 
     Thermal_set_fan_percent(&GLOBAL_STATE->DEVICE_CONFIG, 1);
@@ -433,12 +455,12 @@ bool self_test(void * pvParameters)
     ESP_LOGI(TAG, "Sending work");
 
     //(*GLOBAL_STATE->ASIC_functions.send_work_fn)(GLOBAL_STATE, &job);
-    job = calloc(1, sizeof(bm_job));
+    job = ASIC_uses_fixed_jobs(GLOBAL_STATE) ? &base_job : calloc(1, sizeof(bm_job));
     if (job == NULL) {
         ESP_LOGE(TAG, "Failed to allocate job");
         tests_done(GLOBAL_STATE, false);
     }
-    memcpy(job, &base_job, sizeof(bm_job));
+    if (job != &base_job) memcpy(job, &base_job, sizeof(bm_job));
     ASIC_send_work(GLOBAL_STATE, job);
     bm_job * current_job = job;
 
@@ -533,7 +555,16 @@ bool self_test(void * pvParameters)
             }
 
             // check the nonce difficulty
-            double nonce_diff = test_nonce_value(current_job, asic_result->nonce, asic_result->rolled_version);
+            const bm_job *result_job = current_job;
+#if CONFIG_BM1370_FIXED_JOBS
+            bm1370_job_snapshot saved;
+            if (ASIC_uses_fixed_jobs(GLOBAL_STATE)) {
+                if (!bm1370_jobs_read(asic_result->job_id, &saved)) continue;
+                result_job = &saved.job;
+                asic_result->rolled_version |= result_job->version;
+            }
+#endif
+            double nonce_diff = test_nonce_value(result_job, asic_result->nonce, asic_result->rolled_version);
             if (nonce_diff >= DIFFICULTY) {
                 counter += DIFFICULTY;
                 duration_ms = (esp_timer_get_time() / 1000) - start_ms;
@@ -545,9 +576,9 @@ bool self_test(void * pvParameters)
                 if (duration_ms - last_job_duration > 1000) {
                     // resend job every second to keep asics busy
                     base_job.ntime++;
-                    bm_job * resend_job = calloc(1, sizeof(bm_job));
+                    bm_job * resend_job = ASIC_uses_fixed_jobs(GLOBAL_STATE) ? &base_job : calloc(1, sizeof(bm_job));
                     if (resend_job != NULL) {
-                        memcpy(resend_job, &base_job, sizeof(bm_job));
+                        if (resend_job != &base_job) memcpy(resend_job, &base_job, sizeof(bm_job));
                         ASIC_send_work(GLOBAL_STATE, resend_job);
                         current_job = resend_job;
                     } else {
@@ -600,11 +631,20 @@ bool self_test(void * pvParameters)
         }
     }
 
-    if (current_job != NULL) {
+    if (current_job != NULL && !ASIC_uses_fixed_jobs(GLOBAL_STATE)) {
         free_bm_job(current_job);
     }
     free(GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs);
     free(GLOBAL_STATE->valid_jobs);
+    GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs = NULL;
+    GLOBAL_STATE->valid_jobs = NULL;
+#if CONFIG_BM1370_FIXED_JOBS
+    if (ASIC_uses_fixed_jobs(GLOBAL_STATE)) {
+        bm1370_jobs_lock();
+        bm1370_jobs_clear_locked("self_test_done");
+        bm1370_jobs_unlock();
+    }
+#endif
 
     if (test_core_voltage(GLOBAL_STATE) != ESP_OK) {
         tests_done(GLOBAL_STATE, false);

@@ -14,6 +14,7 @@
 #include "i2c_bitaxe.h"
 #include "adc.h"
 #include "nvs_config.h"
+#include "miner_diagnostics.h"
 #include "self_test.h"
 #include "asic.h"
 #include "bap/bap.h"
@@ -21,13 +22,43 @@
 #include "connect.h"
 #include "asic_reset.h"
 #include "asic_init.h"
+#include "esp_ota_ops.h"
 
 static GlobalState GLOBAL_STATE;
 
 static const char * TAG = "bitaxe";
 
+#define APP_CONFIRM_DELAY_MS (10 * 60 * 1000)
+
+// With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, an OTA image boots once as
+// "pending verify". Unless confirmed before the next reset, the bootloader
+// returns to the previous firmware.
+static void confirm_running_app(const char *reason)
+{
+    esp_ota_img_states_t state;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) return;
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) ESP_LOGI(TAG, "Firmware confirmed (%s); rollback cancelled", reason);
+    else ESP_LOGE(TAG, "Firmware confirmation failed: %s", esp_err_to_name(err));
+}
+
+// Fallback when Wi-Fi never joins: an image that stays up this long, with
+// AxeOS reachable through its access point, is kept.
+static void confirm_app_after_delay(void *unused)
+{
+    vTaskDelay(pdMS_TO_TICKS(APP_CONFIRM_DELAY_MS));
+    confirm_running_app("10 minutes without restart");
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
+    if (xTaskCreate(confirm_app_after_delay, "app confirm", 3072, NULL, 1, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Error creating firmware confirmation task");
+    }
+
     ESP_LOGI(TAG, "Welcome to the bitaxe - FOSS || GTFO!");
 
     if (!esp_psram_is_initialized()) {
@@ -56,6 +87,8 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to init NVS");
         return;
     }
+
+    incidents_init();
 
     // Ensure SSID is initialized before any screen/self-test uses it.
     GLOBAL_STATE.SYSTEM_MODULE.ssid = nvs_config_get_string(NVS_CONFIG_WIFI_SSID);
@@ -106,6 +139,9 @@ void app_main(void)
     while (!GLOBAL_STATE.SYSTEM_MODULE.is_connected) {
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
+
+    // Wi-Fi joined and AxeOS is serving: a later firmware can be uploaded from here.
+    confirm_running_app("Wi-Fi connected, web server running");
 
     queue_init(&GLOBAL_STATE.stratum_queue);
 

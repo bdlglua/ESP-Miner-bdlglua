@@ -1,6 +1,8 @@
-import { Component, Input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'wifi-icon',
   templateUrl: './wifi-icon.component.html',
   styleUrls: ['./wifi-icon.component.scss'],

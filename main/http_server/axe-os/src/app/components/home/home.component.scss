@@ -23,3 +23,20 @@
         transition: background 250ms;
     }
 }
+
+
+.zpool-header-fields {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, max-content) minmax(0, 1fr);
+    gap: .45rem .75rem;
+    margin: 0 0 .9rem;
+
+    dt {
+        color: var(--text-color-secondary);
+    }
+
+    dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+    }
+}

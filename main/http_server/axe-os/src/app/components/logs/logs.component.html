@@ -6,39 +6,41 @@
                 Realtime Logs
             </h2>
 
-            <nav class="flex gap-3 w-full md:w-6">
-                <span class="w-full p-input-icon-left">
-                    <i class="pi pi-filter"></i>
+            <nav class="logs-toolbar w-full md:w-6" aria-label="Log controls">
+                <span class="logs-filter">
+                    <i class="pi pi-filter" aria-hidden="true"></i>
                     <input
                         pInputText
                         type="text"
-                        class="w-full"
+                        aria-label="Case-sensitive log filter"
                         autocomplete="off"
                         placeholder="Case-sensitive filter"
                         id="filter"
                         formControlName="filter"/>
                 </span>
-                <p-button
-                    pp-button
-                    icon="pi pi-{{stopScroll ? 'play' : 'pause'}}"
-                    (click)="stopScroll = !stopScroll"
-                    pTooltip="{{stopScroll ? 'Start' : 'Stop'}} Scrolling"
-                    tooltipPosition="left">
-                </p-button>
-                <p-button
-                    pp-button
-                    icon="pi pi-trash"
-                    (click)="clearLogs()"
-                    pTooltip="Clear Logs"
-                    tooltipPosition="left">
-                </p-button>
-                <p-button
-                    pp-button
-                    icon="pi pi-window-{{isExpanded ? 'minimize' : 'maximize'}}"
-                    (click)="isExpanded = !isExpanded"
-                    pTooltip="{{isExpanded ? 'Minimize' : 'Maximize'}} Logs"
-                    tooltipPosition="left">
-                </p-button>
+                <div class="logs-actions">
+                    <p-button
+                        pp-button
+                        icon="pi pi-{{stopScroll ? 'play' : 'pause'}}"
+                        (click)="stopScroll = !stopScroll"
+                        pTooltip="{{stopScroll ? 'Start' : 'Stop'}} Scrolling"
+                        tooltipPosition="left">
+                    </p-button>
+                    <p-button
+                        pp-button
+                        icon="pi pi-trash"
+                        (click)="clearLogs()"
+                        pTooltip="Clear Logs"
+                        tooltipPosition="left">
+                    </p-button>
+                    <p-button
+                        pp-button
+                        icon="pi pi-window-{{isExpanded ? 'minimize' : 'maximize'}}"
+                        (click)="isExpanded = !isExpanded"
+                        pTooltip="{{isExpanded ? 'Minimize' : 'Maximize'}} Logs"
+                        tooltipPosition="left">
+                    </p-button>
+                </div>
             </nav>
         </div>
 

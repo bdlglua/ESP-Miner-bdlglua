@@ -1,8 +1,9 @@
-import { Component, OnInit, ViewChild, Input, OnDestroy } from '@angular/core';
-import { interval, map, Observable, shareReplay, startWith, Subscription, switchMap, tap, first, Subject, takeUntil, BehaviorSubject, filter, catchError, of, combineLatest } from 'rxjs';
+import { isZpoolSha256 } from 'src/app/services/pool-hosts';
+import { ChangeDetectionStrategy, Component, OnInit, ViewChild, Input, OnDestroy } from '@angular/core';
+import { interval, map, Observable, shareReplay, startWith, switchMap, tap, take, Subject, takeUntil, BehaviorSubject, filter, catchError, of, combineLatest } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormBuilder, FormGroup } from '@angular/forms';
-import { ToastrService } from 'ngx-toastr';
+import { ToastrService } from '@openng/ngx-toastr';
 import { DateAgoPipe } from 'src/app/pipes/date-ago.pipe';
 import { HashSuffixPipe } from 'src/app/pipes/hash-suffix.pipe';
 import { ByteSuffixPipe } from 'src/app/pipes/byte-suffix.pipe';
@@ -14,8 +15,9 @@ import { SystemApiService } from 'src/app/services/system.service';
 import { ThemeService } from 'src/app/services/theme.service';
 import { SystemInfo as ISystemInfo, SystemStatistics as ISystemStatistics } from 'src/app/generated';
 import { Title } from '@angular/platform-browser';
-import { UIChart } from 'primeng/chart';
-import { SelectItem } from 'primeng/api';
+import { UIChart } from '@openng/optimus-ui/chart';
+import { SelectItem } from '@openng/optimus-ui/api';
+import { SelectChangeEvent } from '@openng/optimus-ui/select';
 import { eChartLabel } from 'src/models/enum/eChartLabel';
 import { chartLabelValue } from 'src/models/enum/eChartLabel';
 import { chartLabelKey } from 'src/models/enum/eChartLabel';
@@ -45,6 +47,8 @@ interface ISystemInfoError {
 const HOME_CHART_DATA_SOURCES = 'HOME_CHART_DATA_SOURCES';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-home',
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
@@ -94,7 +98,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   private pageDefaultTitle: string = '';
   private destroy$ = new Subject<void>();
-  private infoSubscription?: Subscription;
+  private stopLiveData$ = new Subject<void>();
   public form!: FormGroup;
 
   @Input() uri = '';
@@ -121,17 +125,32 @@ export class HomeComponent implements OnInit, OnDestroy {
       });
 
     this.pageDefaultTitle = this.titleService.getTitle();
-    this.loadingService.loading$.next(true);
 
-    let dataSources = this.storageService.getItem(HOME_CHART_DATA_SOURCES);
-    if (dataSources === null) {
-      dataSources = `{"chartY1Data":"${chartLabelKey(eChartLabel.hashrate)}",`;
-      dataSources += `"chartY2Data":"${chartLabelKey(eChartLabel.asicTemp)}"}`;
+    // Older or partially saved dashboard preferences may omit one of the two
+    // controls. Angular Reactive Forms throws `_rawValidators` on a missing
+    // control when rendering the dropdowns. Always construct both controls.
+    let storedChartSources: any = {};
+    try {
+      const dataSources = this.storageService.getItem(HOME_CHART_DATA_SOURCES);
+      if (dataSources !== null) {
+        const parsed = JSON.parse(dataSources);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          storedChartSources = parsed;
+        }
+      }
+    } catch {
+      // Malformed browser storage is not a reason to break the dashboard.
     }
 
-    this.form = this.fb.group(JSON.parse(dataSources));
+    const chartSources = {
+      chartY1Data: typeof storedChartSources.chartY1Data === 'string' && storedChartSources.chartY1Data
+        ? storedChartSources.chartY1Data : chartLabelKey(eChartLabel.hashrate),
+      chartY2Data: typeof storedChartSources.chartY2Data === 'string' && storedChartSources.chartY2Data
+        ? storedChartSources.chartY2Data : chartLabelKey(eChartLabel.asicTemp)
+    };
+    this.form = this.fb.group(chartSources);
 
-    this.form.valueChanges.subscribe(() => {
+    this.form.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.updateSystem();
     })
 
@@ -141,6 +160,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+    this.stopLiveData$.complete();
   }
 
   private updateChartColors() {
@@ -177,10 +197,9 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.storageService.setItem(HOME_CHART_DATA_SOURCES, JSON.stringify(form));
 
     this.systemService.updateSystem(this.uri, form)
-      .pipe(this.loadingService.lockUIUntilComplete())
+      .pipe(this.loadingService.lockUIUntilComplete(), takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.infoSubscription?.unsubscribe();
           this.clearDataPoints();
           this.loadPreviousData();
         },
@@ -306,69 +325,80 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   private loadPreviousData() {
+    // Replacing the chart sources must also cancel the previous history/polling cycle.
+    this.stopLiveData$.next();
     const chartY1DataLabel = this.form.get('chartY1Data')?.value;
     const chartY2DataLabel = this.form.get('chartY2Data')?.value;
 
     // load previous data
     this.stats$ = this.systemService.getStatistics(chartY1DataLabel, chartY2DataLabel)
-      .pipe(shareReplay({ refCount: true, bufferSize: 1 }));
+      .pipe(
+        // History is optional: live monitoring should still work if it cannot be loaded.
+        catchError(() => of<ISystemStatistics>({ labels: [], statistics: [], currentTimestamp: Date.now() })),
+        shareReplay({ refCount: true, bufferSize: 1 })
+      );
 
     this.stats$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(stats => {
-        let idxHashrate = -1;
-        let idxPower = -1;
-        let idxChartY1Data = -1;
-        let idxChartY2Data = -1;
-        let idxTimestamp = -1;
+      .pipe(
+        tap(stats => {
+          let idxHashrate = -1;
+          let idxPower = -1;
+          let idxChartY1Data = -1;
+          let idxChartY2Data = -1;
+          let idxTimestamp = -1;
 
-        // map label to index
-        for (let i = 0; i < stats.labels.length; i++) {
-          if (stats.labels[i] === chartLabelKey(eChartLabel.hashrate)) { idxHashrate = i; }
-          if (stats.labels[i] === chartLabelKey(eChartLabel.power))    { idxPower = i; }
-          if (stats.labels[i] === chartY1DataLabel)                    { idxChartY1Data = i; }
-          if (stats.labels[i] === chartY2DataLabel)                    { idxChartY2Data = i; }
-          if (stats.labels[i] === 'timestamp')                         { idxTimestamp = i; }
-        }
-
-        stats.statistics.forEach((element: number[]) => {
-          switch (chartLabelValue(chartY1DataLabel)) {
-            case eChartLabel.asicVoltage:
-            case eChartLabel.voltage:
-            case eChartLabel.current:
-              element[idxChartY1Data] = element[idxChartY1Data] / 1000;
-              break;
-            default:
-              break;
-          }
-          switch (chartLabelValue(chartY2DataLabel)) {
-            case eChartLabel.asicVoltage:
-            case eChartLabel.voltage:
-            case eChartLabel.current:
-              element[idxChartY2Data] = element[idxChartY2Data] / 1000;
-              break;
-            default:
-              break;
+          // map label to index
+          for (let i = 0; i < stats.labels.length; i++) {
+            if (stats.labels[i] === chartLabelKey(eChartLabel.hashrate)) { idxHashrate = i; }
+            if (stats.labels[i] === chartLabelKey(eChartLabel.power))    { idxPower = i; }
+            if (stats.labels[i] === chartY1DataLabel)                    { idxChartY1Data = i; }
+            if (stats.labels[i] === chartY2DataLabel)                    { idxChartY2Data = i; }
+            if (stats.labels[i] === 'timestamp')                         { idxTimestamp = i; }
           }
 
-          this.dataLabel.push(new Date().getTime() - stats.currentTimestamp + element[idxTimestamp]);
-          this.hashrateData.push(element[idxHashrate]);
-          this.powerData.push(element[idxPower]);
-          if (-1 != idxChartY1Data) {
-            this.chartY1Data.push(element[idxChartY1Data]);
-          } else {
-            this.chartY1Data.push(0.0);
-          }
-          if (-1 != idxChartY2Data) {
-            this.chartY2Data.push(element[idxChartY2Data]);
-          } else {
-            this.chartY2Data.push(0.0);
-          }
+          stats.statistics.forEach((element: number[]) => {
+            switch (chartLabelValue(chartY1DataLabel)) {
+              case eChartLabel.asicVoltage:
+              case eChartLabel.voltage:
+              case eChartLabel.current:
+                element[idxChartY1Data] = element[idxChartY1Data] / 1000;
+                break;
+              default:
+                break;
+            }
+            switch (chartLabelValue(chartY2DataLabel)) {
+              case eChartLabel.asicVoltage:
+              case eChartLabel.voltage:
+              case eChartLabel.current:
+                element[idxChartY2Data] = element[idxChartY2Data] / 1000;
+                break;
+              default:
+                break;
+            }
 
-          this.limitDataPoints();
+            this.dataLabel.push(new Date().getTime() - stats.currentTimestamp + element[idxTimestamp]);
+            this.hashrateData.push(element[idxHashrate]);
+            this.powerData.push(element[idxPower]);
+            if (-1 != idxChartY1Data) {
+              this.chartY1Data.push(element[idxChartY1Data]);
+            } else {
+              this.chartY1Data.push(0.0);
+            }
+            if (-1 != idxChartY2Data) {
+              this.chartY2Data.push(element[idxChartY2Data]);
+            } else {
+              this.chartY2Data.push(0.0);
+            }
+
+            this.limitDataPoints();
+          });
+          this.startGetLiveData();
         }),
-        this.startGetLiveData();
-      });
+        switchMap(() => this.info$.pipe(take(1))),
+        this.loadingService.lockUIUntilComplete(),
+        takeUntil(this.stopLiveData$),
+        takeUntil(this.destroy$)
+      ).subscribe();
   }
 
   private isHashrateAxis(label: eChartLabel | undefined) {
@@ -410,6 +440,10 @@ export class HomeComponent implements OnInit, OnDestroy {
       ),
       filter(info => info !== null),
       map(info => {
+        // The firmware omits coinbaseOutputs until a block height is available.
+        // Non-BTC Stratum pools may never provide decodable Bitcoin coinbase outputs.
+        // Normalize it before any dashboard template or system-message handler reads .length.
+        info.coinbaseOutputs = Array.isArray(info.coinbaseOutputs) ? info.coinbaseOutputs : [];
         info.voltage = info.voltage / 1000;
         info.current = info.current / 1000;
         info.coreVoltageActual = info.coreVoltageActual / 1000;
@@ -479,14 +513,10 @@ export class HomeComponent implements OnInit, OnDestroy {
 
         return info;
       }),
+      takeUntil(this.stopLiveData$),
+      takeUntil(this.destroy$),
       shareReplay({ refCount: true, bufferSize: 1 })
     );
-
-    this.info$
-      .pipe(first())
-      .subscribe(() => {
-        this.loadingService.loading$.next(false);
-      });
 
     this.quickLink$ = this.info$.pipe(
       map(info => {
@@ -509,16 +539,17 @@ export class HomeComponent implements OnInit, OnDestroy {
         return result;
       }));
 
-    this.infoSubscription = combineLatest([this.info$, this.systemInfoError$])
-      .pipe(takeUntil(this.destroy$))
+    combineLatest([this.info$, this.systemInfoError$])
+      .pipe(takeUntil(this.stopLiveData$), takeUntil(this.destroy$))
       .subscribe(([info, systemInfoError]) => {
         this.handleSystemMessages(info, systemInfoError);
         this.setTitle(info, systemInfoError);
       });
   }
 
-  onPoolChange(event: { originalEvent: Event; value: PoolLabel }) {
-    const useFallbackStratum = Number(event.value === 'Fallback');
+  onPoolChange(event: SelectChangeEvent) {
+    const selectedPool = event.value as PoolLabel;
+    const useFallbackStratum = Number(selectedPool === 'Fallback');
 
     this.systemService.updateSystem('', { useFallbackStratum })
       .pipe(
@@ -621,6 +652,25 @@ export class HomeComponent implements OnInit, OnDestroy {
     return this.calculateAverage(efficiencies);
   }
 
+  public isZpool(info: ISystemInfo): boolean {
+    return isZpoolSha256(info.isUsingFallbackStratum ? info.fallbackStratumURL : info.stratumURL);
+  }
+
+  public showCoinbasePayout(info: ISystemInfo): boolean {
+    return !this.isZpool(info) && (!info.coinbaseCurrency || info.coinbaseCurrency === 'BTC') &&
+      Array.isArray(info.coinbaseOutputs) && info.coinbaseOutputs.length > 0;
+  }
+
+  public hasBlockDetails(info: ISystemInfo): boolean {
+    return info.blockHeight > 0 || info.networkDifficulty > 0 ||
+      !!info.scriptsig || (Array.isArray(info.coinbaseOutputs) && info.coinbaseOutputs.length > 0) ||
+      this.hasCoinbaseAmount(info);
+  }
+
+  public hasCoinbaseAmount(info: ISystemInfo): boolean {
+    return Number.isFinite(info.coinbaseValueTotalSatoshis) && info.coinbaseValueTotalSatoshis >= 0;
+  }
+
   getPayoutPercentage(info: ISystemInfo) {
     if (info.coinbaseValueTotalSatoshis) {
       return (info.coinbaseValueUserSatoshis ?? 0) / info.coinbaseValueTotalSatoshis * 100;
@@ -658,10 +708,14 @@ export class HomeComponent implements OnInit, OnDestroy {
     updateMessage(!info.frequency || info.frequency < 400, 'FREQUENCY_LOW', 'warn', 'Device frequency is set low - See settings');
     updateMessage(!!info.isUsingFallbackStratum, 'FALLBACK_STRATUM', 'warn', 'Using fallback pool - Share stats reset. Check Pool Settings and / or reboot Device.');
     updateMessage(info.version !== info.axeOSVersion, 'VERSION_MISMATCH', 'warn', `Firmware (${info.version}) and AxeOS (${info.axeOSVersion}) versions do not match. Please make sure to update both www.bin and esp-miner.bin.`);
-    if (info.coinbaseOutputs.length > 0) {
+    if (this.showCoinbasePayout(info)) {
       let percentage = this.getPayoutPercentage(info);
       updateMessage(percentage > 0 && percentage < 95, 'NOT_SOLO_MINING', 'warn', `Your share of the mining reward is only ${percentage.toFixed(1)}%`);
       updateMessage(percentage === 0, 'NO_MINING_REWARD', 'warn', `You don't have a share in the mining reward`);
+    } else {
+      // No decoded outputs: don't retain stale Bitcoin payout warnings on PPLNS pools.
+      updateMessage(false, 'NOT_SOLO_MINING', 'warn', '');
+      updateMessage(false, 'NO_MINING_REWARD', 'warn', '');
     }
   }
 

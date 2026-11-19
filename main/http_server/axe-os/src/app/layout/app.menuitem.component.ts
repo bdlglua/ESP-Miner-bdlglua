@@ -1,13 +1,14 @@
-import { ChangeDetectorRef, Component, Host, HostBinding, Input, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Host, HostBinding, Input, OnDestroy, OnInit } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
-import { animate, state, style, transition, trigger } from '@angular/animations';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { MenuService } from './app.menu.service';
 import { LayoutService } from './service/app.layout.service';
 
 @Component({
-    // eslint-disable-next-line @angular-eslint/component-selector
+  changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+  // eslint-disable-next-line @angular-eslint/component-selector
     selector: '[app-menuitem]',
     template: `
 		<ng-container>
@@ -29,24 +30,13 @@ import { LayoutService } from './service/app.layout.service';
 
             <span *ngIf="item.separator" class="menu-separator block h-1rem"></span>
 
-			<ul *ngIf="item.items && item.visible !== false" [@children]="submenuAnimation">
+			<ul *ngIf="item.items && item.visible !== false" class="axeos-native-submenu" [class.axeos-native-submenu-collapsed]="submenuAnimation === 'collapsed'">
 				<ng-template ngFor let-child let-i="index" [ngForOf]="item.items">
 					<li app-menuitem [item]="child" [index]="i" [parentKey]="key" [class]="child.badgeClass"></li>
 				</ng-template>
 			</ul>
 		</ng-container>
-    `,
-    animations: [
-        trigger('children', [
-            state('collapsed', style({
-                height: '0'
-            })),
-            state('expanded', style({
-                height: '*'
-            })),
-            transition('collapsed <=> expanded', animate('400ms cubic-bezier(0.86, 0, 0.07, 1)'))
-        ])
-    ]
+    `
 })
 export class AppMenuitemComponent implements OnInit, OnDestroy {
 

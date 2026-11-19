@@ -1,10 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { LogsComponent } from './logs.component';
-import { provideToastr } from 'ngx-toastr';
-import { ButtonModule } from 'primeng/button';
+import { provideToastr } from '@openng/ngx-toastr';
+import { ButtonModule } from '@openng/optimus-ui/button';
 import { ReactiveFormsModule } from '@angular/forms';
-import { TooltipModule } from 'primeng/tooltip';
+import { TooltipModule } from '@openng/optimus-ui/tooltip';
 
 describe('LogsComponent', () => {
   let component: LogsComponent;
@@ -20,6 +20,8 @@ describe('LogsComponent', () => {
     
     fixture = TestBed.createComponent(LogsComponent);
     component = fixture.componentInstance;
+    // JSDOM does not implement Element.scrollTo.
+    component.stopScroll = true;
     fixture.detectChanges();
   });
 

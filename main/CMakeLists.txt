@@ -4,6 +4,7 @@ SRCS
     "i2c_bitaxe.c"
     "main.c"
     "nvs_config.c"
+    "miner_diagnostics.c"
     "display.c"
     "screen.c"
     "input.c"
@@ -62,17 +63,18 @@ PRIV_REQUIRES
     "driver"
     "esp_adc"
     "esp_app_format"
+    "espcoredump"
     "esp_event"
     "esp_http_server"
     "esp_netif"
     "esp_psram"
     "esp_timer"
     "esp_wifi"
-    "json"
     "nvs_flash"
     "spiffs"
     "vfs"
     "esp_driver_i2c"
+    "esp_driver_uart"
     "tcp_transport"
 
 EMBED_FILES "http_server/recovery_page.html"
@@ -99,11 +101,11 @@ else()
 
     add_custom_command(
         OUTPUT ${OPENAPI_STAMP}
-        COMMAND ${NPM_EXECUTABLE} i
+        COMMAND ${NPM_EXECUTABLE} ci --no-audit --no-fund
         COMMAND ${NPM_EXECUTABLE} run generate:api
         COMMAND ${CMAKE_COMMAND} -E touch ${OPENAPI_STAMP}
         WORKING_DIRECTORY ${WEB_SRC_DIR}
-        DEPENDS ${OPENAPI_SPEC}
+        DEPENDS ${OPENAPI_SPEC} "${WEB_SRC_DIR}/scripts/generate-api.sh"
         COMMENT "Generating API client from OpenAPI spec (openapi.yaml changed)"
         VERBATIM
         USES_TERMINAL
@@ -121,18 +123,37 @@ else()
         "${WEB_SRC_DIR}/angular.json"
         "${WEB_SRC_DIR}/tsconfig.json"
         "${WEB_SRC_DIR}/tsconfig.app.json"
+        # TypeScript 7 build: ngp preprocessor + esbuild (tools/ngp/README.md)
+        "${WEB_SRC_DIR}/scripts/build-ts7.mjs"
+        "${WEB_SRC_DIR}/scripts/ts7-common.mjs"
+        "${WEB_SRC_DIR}/tools/ngp/main.js"
+        "${WEB_SRC_DIR}/tools/ngp/ng_analyze.node"
     )
 
     # Use a stamp file to track when the build was last done
     set(WEB_UI_STAMP "${CMAKE_BINARY_DIR}/web_ui_build.stamp")
+
+    # AxeOS version.txt must match the firmware version. Pass it explicitly
+    # (environment variables do not reliably reach this step) and rebuild the
+    # UI whenever PROJECT_VER changes.
+    idf_build_get_property(AXEOS_PROJECT_VER PROJECT_VER)
+    set(WEB_UI_VERSION_FILE "${CMAKE_BINARY_DIR}/axeos_web_version.txt")
+    set(WEB_UI_VERSION_OLD "")
+    if(EXISTS ${WEB_UI_VERSION_FILE})
+        file(READ ${WEB_UI_VERSION_FILE} WEB_UI_VERSION_OLD)
+    endif()
+    if(NOT WEB_UI_VERSION_OLD STREQUAL AXEOS_PROJECT_VER)
+        file(WRITE ${WEB_UI_VERSION_FILE} "${AXEOS_PROJECT_VER}")
+    endif()
+    list(APPEND WEB_UI_SOURCES ${WEB_UI_VERSION_FILE})
     # Track version.txt which is generated last and doesn't get deleted
     set(WEB_UI_OUTPUT "${WEB_SRC_DIR}/dist/axe-os/version.txt")
 
     # Custom command that only runs when source files change
     add_custom_command(
         OUTPUT ${WEB_UI_STAMP} ${WEB_UI_OUTPUT}
-        COMMAND ${NPM_EXECUTABLE} i
-        COMMAND ${NPM_EXECUTABLE} run build:no-api-gen
+        COMMAND ${NPM_EXECUTABLE} ci --no-audit --no-fund
+        COMMAND ${CMAKE_COMMAND} -E env AXEOS_WEB_VERSION=${AXEOS_PROJECT_VER} ${NPM_EXECUTABLE} run build:no-api-gen
         COMMAND ${CMAKE_COMMAND} -E touch ${WEB_UI_STAMP}
         WORKING_DIRECTORY ${WEB_SRC_DIR}
         DEPENDS ${WEB_UI_SOURCES} ${OPENAPI_STAMP}
@@ -150,3 +171,6 @@ else()
 
     spiffs_create_partition_image(www ${WEB_SRC_DIR}/dist/axe-os FLASH_IN_PROJECT DEPENDS web_ui_dist)
 endif()
+
+# Project code uses C23 (the ESP-IDF 6 default); ESP-IDF 5.5 itself stays on gnu17.
+target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:C>:-std=gnu23>)

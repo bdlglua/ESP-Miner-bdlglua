@@ -36,3 +36,12 @@ Thumbs.db
 debug.log
 .vscode
 .cache
+
+# Experimental Rust decoder build artifacts
+components/stratum/rust/target/
+tools/jobbook-study/target/
+build-idf6/
+
+# Python bytecode
+__pycache__/
+*.pyc

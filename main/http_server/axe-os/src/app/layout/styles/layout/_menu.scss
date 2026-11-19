@@ -1,6 +1,10 @@
+@use "./variables" as *;
+@use "./mixins" as *;
 .layout-sidebar {
     position: fixed;
-    height: calc(100vh - 9.5rem);
+    // Fit the menu; the window height stays the maximum (scrolls when shorter).
+    height: auto;
+    max-height: calc(100vh - 9.5rem);
     z-index: 999;
     overflow-y: auto;
     user-select: none;

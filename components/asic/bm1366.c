@@ -348,7 +348,7 @@ task_result * BM1366_process_work(void * pvParameters)
         return NULL;
     }
 
-    uint32_t rolled_version = GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[job_id]->version | version_bits;
+    uint32_t rolled_version = mining_rolled_version(GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[job_id], version_bits);
 
     result.job_id = job_id;
     result.nonce = asic_result.job.nonce;

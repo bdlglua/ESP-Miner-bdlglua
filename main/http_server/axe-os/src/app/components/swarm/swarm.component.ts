@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit, ViewChild, HostListener } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, ViewChild, HostListener } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, FormControl } from '@angular/forms';
-import { ToastrService } from 'ngx-toastr';
+import { ToastrService } from '@openng/ngx-toastr';
 import { forkJoin, catchError, from, map, mergeMap, of, take, timeout, toArray, Observable, Subscription } from 'rxjs';
 import { LocalStorageService } from 'src/app/local-storage.service';
 import { LayoutService } from "../../layout/service/app.layout.service";
@@ -17,6 +17,8 @@ const SWARM_GRID_VIEW = 'SWARM_GRID_VIEW';
 type SwarmDevice = { IP: string; ASICModel: string; deviceModel: string; swarmColor: string; asicCount: number; [key: string]: any };
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-swarm',
   templateUrl: './swarm.component.html',
   styleUrls: ['./swarm.component.scss']
@@ -51,7 +53,7 @@ export class SwarmComponent implements OnInit, OnDestroy {
 
   public filterText = '';
 
-  @HostListener('document:keydown.esc', ['$event'])
+  @HostListener('document:keydown.esc')
   onEscKey() {
     if (this.filterText) {
       this.filterText = '';

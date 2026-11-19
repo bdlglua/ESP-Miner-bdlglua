@@ -13,6 +13,7 @@ import {
   Settings
 } from 'src/app/generated';
 
+import { IncidentHistory, PoolStatistics } from './miner-diagnostics';
 import { environment } from '../../environments/environment';
 
 const API_TIMEOUT = 15000;
@@ -26,6 +27,14 @@ export class SystemApiService {
     private httpClient: HttpClient,
     @Optional() private generatedSystemService: GeneratedSystemService
   ) { }
+
+  public getIncidentHistory(): Observable<IncidentHistory> {
+    return this.httpClient.get<IncidentHistory>('/api/system/incidents').pipe(timeout(API_TIMEOUT));
+  }
+
+  public getPoolStatistics(uri = ''): Observable<PoolStatistics> {
+    return this.httpClient.get<PoolStatistics>(`${uri}/api/system/pools`).pipe(timeout(API_TIMEOUT));
+  }
 
   public getInfo(uri: string = ''): Observable<ISystemInfo> {
     if (environment.production && this.generatedSystemService && !uri) {

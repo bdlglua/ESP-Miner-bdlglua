@@ -1,0 +1,119 @@
+ngp: --minify-styles, minified component styles for production builds
+
+The Angular CLI minifies component styles when optimization.styles is on
+(production). ngp inlined them expanded, so a production bundle carried
+unminified CSS and component-style budgets measured more than `ng build`.
+
+With --minify-styles, the style preprocessor emits compressed CSS: Sass
+stylesheets compile with style "compressed", plain CSS goes through Sass's CSS
+syntax. A stylesheet Sass cannot parse as plain CSS, or a workspace without
+`sass`, keeps the original CSS instead of failing the build. Minification
+happens before view encapsulation, as with the Angular CLI.
+
+Applies on top of 0001-ngp-compile-sass-component-styles.patch.
+
+diff --git a/packages/compiler-cli/preprocessor/main.ts b/packages/compiler-cli/preprocessor/main.ts
+index bfaaa99..cf92826 100644
+--- a/packages/compiler-cli/preprocessor/main.ts
++++ b/packages/compiler-cli/preprocessor/main.ts
+@@ -85,7 +85,7 @@ import {isStyleLanguage, StylePreprocessor} from './src/style_preprocessor.js';
+     }
+     if (!targetArg) {
+       console.error(
+-        'Usage: ngp <project-dir|angular.json|tsconfig.json> [--optimize] [--wasm] [--out <dir>] [--in-place] [--root <dir>] [--inline-style-language <css|scss|sass>] [--sidecar <path>] [--perf-trace <path>] [--perf-summary <path>] [--perf-trace-detail]',
++        'Usage: ngp <project-dir|angular.json|tsconfig.json> [--optimize] [--wasm] [--out <dir>] [--in-place] [--root <dir>] [--inline-style-language <css|scss|sass>] [--minify-styles] [--sidecar <path>] [--perf-trace <path>] [--perf-summary <path>] [--perf-trace-detail]',
+       );
+       process.exit(1);
+     }
+@@ -163,6 +163,8 @@ import {isStyleLanguage, StylePreprocessor} from './src/style_preprocessor.js';
+       workspaceRoot: workspaceConfig?.workspaceRoot ?? rootDir,
+       inlineStyleLanguage,
+       includePaths: workspaceConfig?.stylePreprocessorIncludePaths,
++      // Production builds: minify component styles like the Angular CLI (optimization.styles).
++      minify: args.includes('--minify-styles'),
+     });
+ 
+     const compiler = createHybridCompiler(innerAnalyzer, {
+diff --git a/packages/compiler-cli/preprocessor/src/style_preprocessor.ts b/packages/compiler-cli/preprocessor/src/style_preprocessor.ts
+index d54bd41..b2dab77 100644
+--- a/packages/compiler-cli/preprocessor/src/style_preprocessor.ts
++++ b/packages/compiler-cli/preprocessor/src/style_preprocessor.ts
+@@ -13,7 +13,10 @@
+  * Angular CLI). ngp runs without the CLI, so it applies the same rules itself:
+  * - a stylesheet file is compiled according to its extension (`.scss`, `.sass`);
+  * - inline `styles` use the `inlineStyleLanguage` build option of `angular.json`;
+- * - `stylePreprocessorOptions.includePaths` extend the Sass load paths.
++ * - `stylePreprocessorOptions.includePaths` extend the Sass load paths;
++ * - with `minify` (production builds), component styles are minified, as the Angular CLI does
++ *   when `optimization.styles` is on. Plain CSS is minified through Sass's CSS syntax; a
++ *   stylesheet Sass cannot parse as plain CSS is kept unminified rather than rejected.
+  *
+  * `sass` is resolved from the workspace and only loaded once a Sass stylesheet is found, so
+  * CSS-only applications do not need it.
+@@ -32,6 +35,8 @@ export interface StylePreprocessorOptions {
+   inlineStyleLanguage?: StyleLanguage;
+   /** Extra Sass load paths (`angular.json` `stylePreprocessorOptions.includePaths`). */
+   includePaths?: string[];
++  /** Minify component styles (production builds). */
++  minify?: boolean;
+ }
+ 
+ /** The subset of the `sass` package API used here. */
+@@ -39,10 +44,10 @@ interface SassModule {
+   compileString(
+     source: string,
+     options: {
+-      syntax: 'scss' | 'indented';
++      syntax: 'scss' | 'indented' | 'css';
+       url?: URL;
+       loadPaths: string[];
+-      style: 'expanded';
++      style: 'expanded' | 'compressed';
+     },
+   ): {css: string};
+ }
+@@ -110,7 +115,7 @@ export class StylePreprocessor {
+     reportedFile: string | null,
+   ): string {
+     if (language === 'css') {
+-      return content;
++      return this.options.minify ? this.minifyCss(content, containingFile) : content;
+     }
+     if (language === 'less') {
+       throw new StylePreprocessError('Less stylesheets are not supported by ngp.', reportedFile);
+@@ -121,7 +126,7 @@ export class StylePreprocessor {
+         syntax: language === 'sass' ? 'indented' : 'scss',
+         url: pathToFileURL(containingFile),
+         loadPaths: [path.dirname(containingFile), ...this.loadPaths],
+-        style: 'expanded',
++        style: this.options.minify ? 'compressed' : 'expanded',
+       }).css;
+     } catch (error) {
+       const message = error instanceof Error ? error.message : String(error);
+@@ -129,6 +134,26 @@ export class StylePreprocessor {
+     }
+   }
+ 
++  /** Plain CSS minified by Sass; unchanged when Sass is absent or cannot parse it. */
++  private minifyCss(content: string, containingFile: string): string {
++    let sass: SassModule;
++    try {
++      sass = this.loadSass(null);
++    } catch {
++      return content;
++    }
++    try {
++      return sass.compileString(content, {
++        syntax: 'css',
++        url: pathToFileURL(containingFile),
++        loadPaths: [],
++        style: 'compressed',
++      }).css;
++    } catch {
++      return content;
++    }
++  }
++
+   private loadSass(file: string | null): SassModule {
+     if (this.sass === null) {
+       const workspaceRequire = createRequire(path.join(this.options.workspaceRoot, 'package.json'));

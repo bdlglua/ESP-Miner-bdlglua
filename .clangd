@@ -1,0 +1,4 @@
+# Editor analysis only (clangd); the firmware is built by ESP-IDF's GCC.
+# Keep the host's /usr/include (glibc) out of ESP32 newlib header lookups.
+CompileFlags:
+  Add: [-nostdlibinc]

@@ -1,0 +1,449 @@
+ngp: compile Sass component styles (.scss/.sass, inlineStyleLanguage)
+
+ngtsc leaves stylesheet preprocessing to its resource host (the Angular CLI's
+transformResource); ngp ran without one and inlined Sass verbatim, so `$vars`,
+mixins and @use reached the browser. ngp now applies the Angular CLI rules:
+
+- styleUrl(s) and template <link> stylesheets compile by extension
+  (.scss -> SCSS, .sass -> indented syntax, other files untouched);
+- inline `styles` use angular.json `inlineStyleLanguage`
+  (or `--inline-style-language css|scss|sass`);
+- angular.json `stylePreprocessorOptions.includePaths` and the workspace
+  node_modules are Sass load paths;
+- `sass` is resolved from the workspace, loaded only when needed;
+- a stylesheet that does not compile is reported as NG2008 (like a stylesheet
+  ngtsc cannot load), with the Sass message, anchored on its styleUrl.
+
+Applies to Angular 22.3.0-rc.0 and 22.3.0, packages/compiler-cli/preprocessor.
+
+diff --git a/packages/compiler-cli/preprocessor/api.ts b/packages/compiler-cli/preprocessor/api.ts
+index 718b848..94effc0 100644
+--- a/packages/compiler-cli/preprocessor/api.ts
++++ b/packages/compiler-cli/preprocessor/api.ts
+@@ -32,6 +32,13 @@ export {SidecarAnalyzer} from './src/analyzer_sidecar.js';
+ 
+ export {run} from './ngp.js';
+ export type {RunOptions} from './ngp.js';
++export {
++  isStyleLanguage,
++  StylePreprocessError,
++  StylePreprocessor,
++  type StyleLanguage,
++  type StylePreprocessorOptions,
++} from './src/style_preprocessor.js';
+ 
+ export {WasmAnalyzer, type WasmInner} from './src/analyzer_wasm.js';
+ export type {ClassEntity} from './src/indexer_api.js';
+diff --git a/packages/compiler-cli/preprocessor/main.ts b/packages/compiler-cli/preprocessor/main.ts
+index e164b4c..bfaaa99 100644
+--- a/packages/compiler-cli/preprocessor/main.ts
++++ b/packages/compiler-cli/preprocessor/main.ts
+@@ -24,6 +24,7 @@ import {
+   writeTraceFile,
+ } from './src/perf.js';
+ import {run} from './ngp.js';
++import {isStyleLanguage, StylePreprocessor} from './src/style_preprocessor.js';
+ 
+ (async () => {
+   try {
+@@ -70,6 +71,7 @@ import {run} from './ngp.js';
+         if (
+           arg === '--out' ||
+           arg === '--root' ||
++          arg === '--inline-style-language' ||
+           arg === '--sidecar' ||
+           arg === '--perf-trace' ||
+           arg === '--perf-summary'
+@@ -83,7 +85,7 @@ import {run} from './ngp.js';
+     }
+     if (!targetArg) {
+       console.error(
+-        'Usage: ngp <project-dir|angular.json|tsconfig.json> [--optimize] [--wasm] [--out <dir>] [--in-place] [--root <dir>] [--sidecar <path>] [--perf-trace <path>] [--perf-summary <path>] [--perf-trace-detail]',
++        'Usage: ngp <project-dir|angular.json|tsconfig.json> [--optimize] [--wasm] [--out <dir>] [--in-place] [--root <dir>] [--inline-style-language <css|scss|sass>] [--sidecar <path>] [--perf-trace <path>] [--perf-summary <path>] [--perf-trace-detail]',
+       );
+       process.exit(1);
+     }
+@@ -145,12 +147,31 @@ import {run} from './ngp.js';
+         ngAnalyzeDir,
+       });
+     }
++    // Component styles: Sass by file extension, inline styles in `inlineStyleLanguage`
++    // (`--inline-style-language` overrides angular.json), like the Angular CLI.
++    const inlineStyleLanguageIndex = args.indexOf('--inline-style-language');
++    const inlineStyleLanguage =
++      inlineStyleLanguageIndex !== -1
++        ? args[inlineStyleLanguageIndex + 1]
++        : (workspaceConfig?.inlineStyleLanguage ?? 'css');
++    if (!isStyleLanguage(inlineStyleLanguage)) {
++      throw new Error(
++        `Unsupported inline style language '${inlineStyleLanguage}' (css, scss, sass, less).`,
++      );
++    }
++    const stylePreprocessor = new StylePreprocessor({
++      workspaceRoot: workspaceConfig?.workspaceRoot ?? rootDir,
++      inlineStyleLanguage,
++      includePaths: workspaceConfig?.stylePreprocessorIncludePaths,
++    });
++
+     const compiler = createHybridCompiler(innerAnalyzer, {
+       optimize,
+       rootDir,
+       enableTemplateTypeChecker: enableTemplateTypeCheckerArg,
+       incremental: false,
+       tracer,
++      stylePreprocessor,
+     });
+ 
+     console.log('Processing files...');
+diff --git a/packages/compiler-cli/preprocessor/src/hybrid_compiler.ts b/packages/compiler-cli/preprocessor/src/hybrid_compiler.ts
+index 25adb69..6ed7da2 100644
+--- a/packages/compiler-cli/preprocessor/src/hybrid_compiler.ts
++++ b/packages/compiler-cli/preprocessor/src/hybrid_compiler.ts
+@@ -6,6 +6,7 @@
+  * found in the LICENSE file at https://angular.dev/license
+  */
+ 
++import type {StylePreprocessor} from './style_preprocessor.js';
+ import {
+   BoundTarget,
+   LEGACY_OPTIONAL_CHAINING_DEFAULT,
+@@ -145,6 +146,8 @@ export interface HybridCompilerOptions {
+   isClosureCompilerEnabled?: boolean;
+   emitDeclarationOnly?: boolean;
+   externalRuntimeStyles?: boolean;
++  /** Compiles Sass component styles (`.scss`/`.sass`, `inlineStyleLanguage`). */
++  stylePreprocessor?: StylePreprocessor;
+   onlyExplicitDeferDependencyImports?: boolean;
+   enableTemplateSourceLocations?: boolean;
+   onlyPublishPublicTypingsForNgModules?: boolean;
+@@ -208,6 +211,8 @@ export interface CreateHybridCompilerOptions {
+   enableTemplateTypeChecker?: boolean;
+   incremental?: boolean;
+   tracer?: Tracer;
++  /** Compiles Sass component styles; see {@link StylePreprocessor}. */
++  stylePreprocessor?: StylePreprocessor;
+ }
+ 
+ /**
+@@ -259,6 +264,7 @@ export function createHybridCompiler(
+     rootDirs,
+     incremental: options.incremental,
+     tracer: options.tracer,
++    stylePreprocessor: options.stylePreprocessor,
+   });
+ }
+ 
+@@ -297,6 +303,7 @@ export class HybridCompiler {
+   readonly isClosureCompilerEnabled: boolean;
+   readonly emitDeclarationOnly: boolean;
+   readonly externalRuntimeStyles: boolean;
++  readonly stylePreprocessor: StylePreprocessor | undefined;
+   readonly onlyExplicitDeferDependencyImports: boolean;
+   readonly enableTemplateSourceLocations: boolean;
+   readonly onlyPublishPublicTypingsForNgModules: boolean;
+@@ -347,6 +354,7 @@ export class HybridCompiler {
+     this.isClosureCompilerEnabled = options.isClosureCompilerEnabled ?? false;
+     this.emitDeclarationOnly = options.emitDeclarationOnly ?? false;
+     this.externalRuntimeStyles = options.externalRuntimeStyles ?? false;
++    this.stylePreprocessor = options.stylePreprocessor;
+     this.onlyExplicitDeferDependencyImports = options.onlyExplicitDeferDependencyImports ?? false;
+     this.enableTemplateSourceLocations = options.enableTemplateSourceLocations ?? false;
+     this.onlyPublishPublicTypingsForNgModules =
+diff --git a/packages/compiler-cli/preprocessor/src/processor.ts b/packages/compiler-cli/preprocessor/src/processor.ts
+index 66b0d3c..86f46df 100644
+--- a/packages/compiler-cli/preprocessor/src/processor.ts
++++ b/packages/compiler-cli/preprocessor/src/processor.ts
+@@ -94,6 +94,7 @@ import {
+   type TcbTargetInput,
+ } from './tcb.js';
+ import {lineNumberAtOffset} from './tcb_util.js';
++import {StylePreprocessError, type StylePreprocessor} from './style_preprocessor.js';
+ import type * as nga from './types.js';
+ 
+ interface HybridParseTemplateOptions extends ParseTemplateOptions {
+@@ -110,6 +111,8 @@ interface HybridCompilerContext {
+   isClosureCompilerEnabled: boolean;
+   emitDeclarationOnly?: boolean;
+   externalRuntimeStyles?: boolean;
++  /** Compiles Sass component styles; plain CSS is used as-is when absent. */
++  stylePreprocessor?: StylePreprocessor;
+   onlyExplicitDeferDependencyImports?: boolean;
+   enableTemplateSourceLocations?: boolean;
+   onlyPublishPublicTypingsForNgModules?: boolean;
+@@ -749,7 +752,19 @@ function compileClasses(file: FileCompilation): string | null | undefined {
+           externalStyles.push(styleUrl.resolvedPath);
+         }
+       } else if (component.stylesFromUrls) {
+-        allStyles.push(...component.stylesFromUrls);
++        // The analyzer drops the content of missing files (already reported as NG2008), so
++        // contents and URLs pair up only when every stylesheet was found.
++        const urls = component.styleUrls ?? [];
++        const paired = urls.length === component.stylesFromUrls.length;
++        component.stylesFromUrls.forEach((style, i) => {
++          const url = paired ? urls[i] : undefined;
++          const css = url
++            ? preprocessStyle(ctx, style, url.resolvedPath, filePath, url.stringLiteralSpan, fileDiagnostics)
++            : style;
++          if (css !== null) {
++            allStyles.push(css);
++          }
++        });
+       }
+ 
+       // 1. Parse template (or reuse if already parsed)
+@@ -835,7 +850,17 @@ function compileClasses(file: FileCompilation): string | null | undefined {
+         }
+ 
+         if (resource?.content != null) {
+-          allStyles.push(resource.content);
++          const css = preprocessStyle(
++            ctx,
++            resource.content,
++            resource.resolvedPath,
++            filePath,
++            component.templateUrlSpan ?? component.templateSpan,
++            fileDiagnostics,
++          );
++          if (css !== null) {
++            allStyles.push(css);
++          }
+         } else {
+           // NG2008 (COMPONENT_RESOURCE_NOT_FOUND), anchored where ngtsc anchors
+           // template-sourced stylesheet failures: the template declaration node
+@@ -855,7 +880,12 @@ function compileClasses(file: FileCompilation): string | null | undefined {
+       // Inline styles (`styles` and `<style>`) are always bundled into `allStyles`, even under
+       // `externalRuntimeStyles`, matching `ngtsc` synchronous compilation behavior.
+       if (component.styles) {
+-        allStyles.push(...component.styles);
++        for (const style of component.styles) {
++          const css = preprocessStyle(ctx, style, null, filePath, component.argsSpan, fileDiagnostics);
++          if (css !== null) {
++            allStyles.push(css);
++          }
++        }
+       }
+       allStyles.push(...parsed.styles);
+ 
+@@ -3621,6 +3651,46 @@ function templateDiagnosticLocation(
+  * to `component.templateUrlSpan` in the component's source file (mirroring ngtsc's
+  * `makeTemplateDiagnostic`).
+  */
++/**
++ * Compiles a component style with `ctx.stylePreprocessor` (`file` is null for inline styles).
++ * ngtsc gets this from its resource host and reports a stylesheet it cannot load as NG2008;
++ * a stylesheet that does not compile is reported the same way. Returns null on failure.
++ */
++function preprocessStyle(
++  ctx: HybridCompilerContext,
++  content: string,
++  file: string | null,
++  componentFile: string,
++  span: nga.SpanMetadata | undefined,
++  diagnostics: nga.NgDiagnostic[],
++): string | null {
++  const preprocessor = ctx.stylePreprocessor;
++  if (!preprocessor) {
++    return content;
++  }
++  try {
++    return file !== null
++      ? preprocessor.processFile(content, file)
++      : preprocessor.processInline(content, componentFile);
++  } catch (error) {
++    if (!(error instanceof StylePreprocessError)) {
++      throw error;
++    }
++    const what =
++      file !== null
++        ? `stylesheet '${path.relative(path.dirname(componentFile), file)}'`
++        : 'inline styles';
++    diagnostics.push({
++      category: 1,
++      code: ErrorCode.COMPONENT_RESOURCE_NOT_FOUND,
++      messageText: `Could not compile ${what}: ${error.message}`,
++      filePath: componentFile,
++      span: span ? {start: span.start, end: span.end} : undefined,
++    });
++    return null;
++  }
++}
++
+ function withTemplateDiagnosticLocation(
+   component: nga.ComponentMetadata | undefined,
+   filePath: string,
+diff --git a/packages/compiler-cli/preprocessor/src/style_preprocessor.ts b/packages/compiler-cli/preprocessor/src/style_preprocessor.ts
+new file mode 100644
+index 0000000..d54bd41
+--- /dev/null
++++ b/packages/compiler-cli/preprocessor/src/style_preprocessor.ts
+@@ -0,0 +1,147 @@
++/**
++ * @license
++ * Copyright Google LLC All Rights Reserved.
++ *
++ * Use of this source code is governed by an MIT-style license that can be
++ * found in the LICENSE file at https://angular.dev/license
++ */
++
++/**
++ * Component stylesheet preprocessing (Sass) for ngp.
++ *
++ * ngtsc leaves this to its resource host (`ResourceHost.transformResource`, implemented by the
++ * Angular CLI). ngp runs without the CLI, so it applies the same rules itself:
++ * - a stylesheet file is compiled according to its extension (`.scss`, `.sass`);
++ * - inline `styles` use the `inlineStyleLanguage` build option of `angular.json`;
++ * - `stylePreprocessorOptions.includePaths` extend the Sass load paths.
++ *
++ * `sass` is resolved from the workspace and only loaded once a Sass stylesheet is found, so
++ * CSS-only applications do not need it.
++ */
++
++import {createRequire} from 'node:module';
++import * as path from 'node:path';
++import {pathToFileURL} from 'node:url';
++
++export type StyleLanguage = 'css' | 'scss' | 'sass' | 'less';
++
++export interface StylePreprocessorOptions {
++  /** Workspace root: resolves `sass`, `includePaths` and bare package imports. */
++  workspaceRoot: string;
++  /** Language of inline component `styles` (`angular.json` `inlineStyleLanguage`). */
++  inlineStyleLanguage?: StyleLanguage;
++  /** Extra Sass load paths (`angular.json` `stylePreprocessorOptions.includePaths`). */
++  includePaths?: string[];
++}
++
++/** The subset of the `sass` package API used here. */
++interface SassModule {
++  compileString(
++    source: string,
++    options: {
++      syntax: 'scss' | 'indented';
++      url?: URL;
++      loadPaths: string[];
++      style: 'expanded';
++    },
++  ): {css: string};
++}
++
++/** A stylesheet that could not be compiled; `file` is null for inline styles. */
++export class StylePreprocessError extends Error {
++  constructor(
++    message: string,
++    readonly file: string | null,
++  ) {
++    super(message);
++  }
++}
++
++const STYLE_LANGUAGES: ReadonlySet<string> = new Set(['css', 'scss', 'sass', 'less']);
++
++export function isStyleLanguage(value: unknown): value is StyleLanguage {
++  return typeof value === 'string' && STYLE_LANGUAGES.has(value);
++}
++
++export class StylePreprocessor {
++  readonly inlineStyleLanguage: StyleLanguage;
++  private readonly loadPaths: string[];
++  private sass: SassModule | null = null;
++
++  constructor(private readonly options: StylePreprocessorOptions) {
++    this.inlineStyleLanguage = options.inlineStyleLanguage ?? 'css';
++    this.loadPaths = [
++      ...(options.includePaths ?? []).map((p) => path.resolve(options.workspaceRoot, p)),
++      path.join(options.workspaceRoot, 'node_modules'),
++    ];
++  }
++
++  /** The language of a stylesheet file, from its extension (CSS when unknown). */
++  static languageOf(file: string): StyleLanguage {
++    switch (path.extname(file).toLowerCase()) {
++      case '.scss':
++        return 'scss';
++      case '.sass':
++        return 'sass';
++      case '.less':
++        return 'less';
++      default:
++        return 'css';
++    }
++  }
++
++  /** Compiles a stylesheet file's content to CSS. */
++  processFile(content: string, file: string): string {
++    return this.compile(content, StylePreprocessor.languageOf(file), file, file);
++  }
++
++  /**
++   * Compiles an inline style of the component declared in `componentFile`. Relative imports
++   * resolve from the component's directory, as with the Angular CLI.
++   */
++  processInline(content: string, componentFile: string): string {
++    return this.compile(content, this.inlineStyleLanguage, componentFile, null);
++  }
++
++  private compile(
++    content: string,
++    language: StyleLanguage,
++    containingFile: string,
++    reportedFile: string | null,
++  ): string {
++    if (language === 'css') {
++      return content;
++    }
++    if (language === 'less') {
++      throw new StylePreprocessError('Less stylesheets are not supported by ngp.', reportedFile);
++    }
++    const sass = this.loadSass(reportedFile);
++    try {
++      return sass.compileString(content, {
++        syntax: language === 'sass' ? 'indented' : 'scss',
++        url: pathToFileURL(containingFile),
++        loadPaths: [path.dirname(containingFile), ...this.loadPaths],
++        style: 'expanded',
++      }).css;
++    } catch (error) {
++      const message = error instanceof Error ? error.message : String(error);
++      throw new StylePreprocessError(message, reportedFile);
++    }
++  }
++
++  private loadSass(file: string | null): SassModule {
++    if (this.sass === null) {
++      const workspaceRequire = createRequire(path.join(this.options.workspaceRoot, 'package.json'));
++      try {
++        this.sass = workspaceRequire('sass') as SassModule;
++      } catch {
++        throw new StylePreprocessError(
++          `Compiling Sass stylesheets requires the 'sass' package in the workspace ` +
++            `(${this.options.workspaceRoot}).`,
++          file,
++        );
++      }
++    }
++    return this.sass;
++  }
++}
+diff --git a/packages/compiler-cli/preprocessor/src/workspace.ts b/packages/compiler-cli/preprocessor/src/workspace.ts
+index 9866b53..9055b63 100644
+--- a/packages/compiler-cli/preprocessor/src/workspace.ts
++++ b/packages/compiler-cli/preprocessor/src/workspace.ts
+@@ -17,6 +17,10 @@ export interface WorkspaceConfig {
+   indexHtml: string | null;
+   assets: Array<string | {input: string; glob: string; output?: string}>;
+   styles: Array<string | {input: string; bundleName?: string; inject?: boolean}>;
++  /** Language of inline component styles (`inlineStyleLanguage`, default `css`). */
++  inlineStyleLanguage?: string;
++  /** Sass load paths (`stylePreprocessorOptions.includePaths`). */
++  stylePreprocessorIncludePaths?: string[];
+ }
+ 
+ export function stripJsonComments(json: string): string {
+@@ -145,5 +149,7 @@ export async function resolveWorkspaceConfig(targetPath: string): Promise<Worksp
+     indexHtml: indexHtml ? path.resolve(workspaceRoot, indexHtml) : null,
+     assets: options.assets || [],
+     styles: options.styles || [],
++    inlineStyleLanguage: options.inlineStyleLanguage,
++    stylePreprocessorIncludePaths: options.stylePreprocessorOptions?.includePaths,
+   };
+ }

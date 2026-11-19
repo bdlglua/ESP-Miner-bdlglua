@@ -5,6 +5,16 @@
 #include "global_state.h"
 #include "asic_common.h"
 
+static inline bool ASIC_uses_fixed_jobs(const GlobalState *state)
+{
+#if CONFIG_BM1370_FIXED_JOBS
+    return state->DEVICE_CONFIG.family.asic.id == BM1370;
+#else
+    (void)state;
+    return false;
+#endif
+}
+
 uint8_t ASIC_init(GlobalState * GLOBAL_STATE);
 task_result * ASIC_process_work(GlobalState * GLOBAL_STATE);
 int ASIC_set_max_baud(GlobalState * GLOBAL_STATE);

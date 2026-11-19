@@ -57,10 +57,15 @@
         "task.h": "c",
         "stdlib.h": "c"
     },
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}/build-idf6",
+        "--query-driver=/home/bdlxs/.espressif/tools/xtensa-esp-elf/**/bin/xtensa-esp32s3-elf-*"
+    ],
     "editor.formatOnSave": false,
     "cSpell.words": [
         "ssid"
     ],
     "idf.port": "/dev/ttyACM0",
-    "C_Cpp.intelliSenseEngine": "Tag Parser"
+    "C_Cpp.intelliSenseEngine": "Tag Parser",
+    "idf.currentSetup": "/home/bdlxs/.espressif/v6.1/esp-idf"
 }

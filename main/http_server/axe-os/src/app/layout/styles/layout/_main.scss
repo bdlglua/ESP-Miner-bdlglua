@@ -1,3 +1,14 @@
+@use "./variables" as *;
+:root {
+    --font-family: 'Nippo-Regular', sans-serif;
+    --sidebar-width: 12rem;
+    --topbar-height: 5.5rem;
+    --border-radius: 2px;
+    --inline-spacing: 0.5rem;
+    --content-padding: 1rem;
+    color-scheme: dark;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -25,4 +36,14 @@ a {
 
 .layout-wrapper {
     min-height: 100vh;
+}
+
+// Native navigation buttons previously inherited this reset from the old theme.
+.p-link {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
 }

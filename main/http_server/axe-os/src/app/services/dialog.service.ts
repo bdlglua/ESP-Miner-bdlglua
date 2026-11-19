@@ -1,6 +1,6 @@
-import { Component, Injectable } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Injectable } from '@angular/core';
 import { Observable, Subject } from 'rxjs';
-import { DialogService as PrimeDialogService, DynamicDialogConfig } from 'primeng/dynamicdialog';
+import { DialogService as PrimeDialogService, DynamicDialogConfig } from '@openng/optimus-ui/dynamicdialog';
 
 interface DialogOption {
   label: string;
@@ -24,12 +24,12 @@ export class DialogService {
         options: options,
         onSelect: (value: string) => {
           result.next(value);
-          ref.close();
+          ref?.close();
         }
       }
     });
 
-    ref.onClose.subscribe(() => {
+    ref?.onClose.subscribe(() => {
       result.complete();
     });
 
@@ -38,6 +38,8 @@ export class DialogService {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   template: `
     <div class="flex flex-column gap-2">
       <p-button *ngFor="let option of config.data.options"

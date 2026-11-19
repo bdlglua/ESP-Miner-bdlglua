@@ -1,6 +1,10 @@
 # The following lines of boilerplate have to be in your project's CMakeLists
 # in this exact order for cmake to work correctly
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
+
+if(NOT DEFINED PROJECT_VER)
+    set(PROJECT_VER "v3.0.3-bdlglua")
+endif()
 
 # (Not part of the boilerplate)
 # This example uses an extra component for common functions such as Wi-Fi and Ethernet connection.

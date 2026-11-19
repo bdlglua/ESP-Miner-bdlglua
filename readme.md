@@ -1,3 +1,30 @@
+# ESP-Miner-bdlglua
+
+Version modifiée d'[ESP-Miner](https://github.com/bitaxeorg/ESP-Miner) **v2.13.2** (firmware AxeOS
+pour Bitaxe), utilisée sur un Bitaxe Gamma 601 (BM1370). Version actuelle : **v3.0.3-bdlglua**.
+Le premier commit du dépôt est la v2.13.2 officielle ; le commit suivant contient toutes les
+modifications.
+
+Principales différences avec la v2.13.2 :
+
+- **ESP-IDF 6.1** (GCC 15.2, C23), bootloader 6.1 et rollback OTA (une image qui ne démarre pas
+  correctement revient à la précédente).
+- **Stratum durci** : parseur testé contre des messages de pool invalides, échappement JSON,
+  difficulté fractionnaire, envois TCP complets, TCP_NODELAY, masque de version BIP-320.
+- **Rust** (no_std, toolchain Espressif 1.100) pour le décodage du coinbase et le magasin de jobs BM1370.
+- Pools zpool, BCMonster, MiningDutch ; décodage du coinbase Bitcoin, Peercoin, DigiByte.
+- Interface **AxeOS en Angular 22.3 et TypeScript 7** (préprocesseur `ngp` d'Angular avec correctifs
+  locaux, voir [main/http_server/axe-os/README.md](main/http_server/axe-os/README.md)).
+- Historique des démarrages, capture des crashs, statistiques par pool.
+- Tests sur PC avec ASan/UBSan : `tools/test_*.py`.
+
+La CI GitHub héritée de la v2.13.2 (`.github/workflows`) n'est pas encore adaptée à cette
+chaîne de compilation.
+
+Licence : GPL-3.0, comme ESP-Miner (voir [LICENSE](LICENSE)).
+
+---
+
 [![](https://dcbadge.vercel.app/api/server/3E8ca2dkcC)](https://discord.gg/osmu)
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/bitaxeorg/esp-miner/total)

@@ -1,10 +1,12 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import { ChangeDetectionStrategy, AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 
 interface ConfettiDivElement extends HTMLDivElement {
   removeTimeout?: number;
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.Eager,
+  standalone: false,
   selector: 'app-confetti',
   templateUrl: './confetti.component.html',
   styleUrls: ['./confetti.component.scss']

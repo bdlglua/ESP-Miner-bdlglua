@@ -14,13 +14,13 @@
             <ng-container *ngIf="!settingsUnlocked">
                 <label (click)="frequencyDropdown.show()" class="col-12 md:col-2 md:m-0 hover-next-input">Frequency</label>
                 <div class="col-12 md:col-10">
-                    <p-dropdown
+                    <p-select
                         [options]="dropdownFrequency"
                         optionLabel="name"
                         optionValue="value"
                         formControlName="frequency"
                         #frequencyDropdown
-                    ></p-dropdown>
+                    ></p-select>
                 </div>
             </ng-container>
         </div>
@@ -35,13 +35,13 @@
             <ng-container *ngIf="!settingsUnlocked">
                 <label (click)="voltageDropdown.show()" class="col-12 md:col-2 md:m-0 hover-next-input">Core Voltage</label>
                 <div class="col-12 md:col-10">
-                    <p-dropdown
+                    <p-select
                         [options]="dropdownVoltage"
                         optionLabel="name"
                         optionValue="value"
                         formControlName="coreVoltage"
                         #voltageDropdown
-                    ></p-dropdown>
+                    ></p-select>
                 </div>
             </ng-container>
         </div>
@@ -106,14 +106,14 @@
         <div class="field grid p-fluid">
             <label (click)="displayDropdown.show()" class="col-12 md:col-2 md:m-0 hover-next-input">Type</label>
             <div class="col-12 md:col-10">
-                <p-dropdown [options]="displays" formControlName="display" #displayDropdown></p-dropdown>
+                <p-select [options]="displays" formControlName="display" #displayDropdown></p-select>
             </div>
         </div>
 
         <div class="field grid p-fluid">
             <label (click)="rotationDropdown.show()" class="col-12 md:col-2 md:m-0 hover-next-input">Rotation</label>
             <div class="col-12 md:col-10">
-                <p-dropdown [options]="rotations" formControlName="rotation" #rotationDropdown></p-dropdown>
+                <p-select [options]="rotations" formControlName="rotation" #rotationDropdown></p-select>
             </div>
         </div>
 
