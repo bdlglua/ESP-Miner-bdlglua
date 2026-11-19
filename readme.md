@@ -18,8 +18,17 @@ Principales différences avec la v2.13.2 :
 - Historique des démarrages, capture des crashs, statistiques par pool.
 - Tests sur PC avec ASan/UBSan : `tools/test_*.py`.
 
-La CI GitHub héritée de la v2.13.2 (`.github/workflows`) n'est pas encore adaptée à cette
-chaîne de compilation.
+CI GitHub (`.github/workflows`) :
+
+- **Build Firmware** (chaque push / pull request) : AxeOS (`npm ci`, tests Vitest, build
+  TypeScript 7), Rust Espressif 1.100.0.0, ESP-IDF 6.1, puis les tests PC
+  (`tools/ci/host-tests.sh`, ASan/UBSan) dans Ubuntu 26.04. Le firmware est téléchargeable
+  dans les artefacts du run.
+- **Release** (release GitHub publiée) : `esp-miner.bin`, `www.bin` et une image d'usine par
+  carte (`esp-miner-factory-<carte>-<tag>.bin`) sont ajoutés à la release.
+
+La configuration d'un build propre vient de `sdkconfig.defaults` ; elle est identique à
+celle du firmware installé.
 
 Licence : GPL-3.0, comme ESP-Miner (voir [LICENSE](LICENSE)).
 

@@ -1,0 +1,124 @@
+# Firmware build shared by build.yml (push / pull request) and release.yml.
+# Same chain as the local build: ESP-IDF 6.1, Espressif Rust 1.100.0.0 (toolchain
+# "axeos-esp"), AxeOS built with TypeScript 7 (ngp) and tested with Vitest.
+name: Firmware
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  IDF_VERSION: v6.1
+  RUST_ESP_VERSION: 1.100.0.0
+  NODE_VERSION: 26.13.1
+
+jobs:
+  firmware:
+    name: Firmware (ESP-IDF 6.1)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- AxeOS (web UI) -------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: main/http_server/axe-os/package-lock.json
+
+      - name: Setup Java (OpenAPI generator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache OpenAPI generator
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/axeos-openapi-generator
+          key: openapi-generator-7.17.0
+
+      - name: Build and test AxeOS
+        working-directory: main/http_server/axe-os
+        run: |
+          npm ci --no-audit --no-fund
+          npm run generate:api
+          npm test
+          npm run build:no-api-gen
+
+      # --- Rust (Espressif toolchain) -------------------------------------------------
+      - name: Cache Rust toolchain
+        id: rust-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.rustup/toolchains/axeos-esp
+          key: rust-esp-${{ env.RUST_ESP_VERSION }}-x86_64-linux
+
+      - name: Install Rust toolchain axeos-esp ${{ env.RUST_ESP_VERSION }}
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/esp-rs/rust-build/releases/download/v${RUST_ESP_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "${base}/rust-${RUST_ESP_VERSION}-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "${tmp}"
+          curl -fsSL "${base}/rust-src-${RUST_ESP_VERSION}.tar.xz" | tar -xJ -C "${tmp}"
+          for component in "${tmp}"/*/; do
+            bash "${component}install.sh" --prefix="${HOME}/.rustup/toolchains/axeos-esp" --disable-ldconfig
+          done
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-esp-${{ env.RUST_ESP_VERSION }}-${{ hashFiles('components/stratum/rust/Cargo.lock') }}
+
+      # The firmware build runs cargo --offline: fetch the crate and core dependencies first.
+      - name: Fetch Rust dependencies
+        run: |
+          cargo +axeos-esp --version
+          cargo +axeos-esp build --manifest-path components/stratum/rust/Cargo.toml \
+            --target-dir "${RUNNER_TEMP}/rust-fetch" --target xtensa-esp32s3-espidf \
+            --release --locked --features fixed-jobs,asic-protocol -Zbuild-std=core
+
+      # --- ESP-IDF 6.1 ----------------------------------------------------------------
+      - name: Cache ESP-IDF
+        id: idf-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/esp/esp-idf-${{ env.IDF_VERSION }}
+            ~/.espressif
+          key: esp-idf-${{ env.IDF_VERSION }}-esp32s3-1
+
+      - name: Install ESP-IDF ${{ env.IDF_VERSION }}
+        if: steps.idf-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch "${IDF_VERSION}" --depth 1 --recursive --shallow-submodules \
+            https://github.com/espressif/esp-idf.git "${HOME}/esp/esp-idf-${IDF_VERSION}"
+          "${HOME}/esp/esp-idf-${IDF_VERSION}/install.sh" esp32s3
+
+      # GITHUB_ACTIONS=true: main/CMakeLists.txt packs the AxeOS build above into www.bin.
+      - name: Build firmware
+        run: |
+          # shellcheck source=/dev/null
+          . "${HOME}/esp/esp-idf-${IDF_VERSION}/export.sh" > /dev/null
+          idf.py build
+          python -c "import json; print('Version:', json.load(open('build/project_description.json'))['project_version'])"
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          if-no-files-found: error
+          path: |
+            build/esp-miner.bin
+            build/esp-miner.elf
+            build/www.bin
+            build/ota_data_initial.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin

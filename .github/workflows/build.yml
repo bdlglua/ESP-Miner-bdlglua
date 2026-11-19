@@ -1,48 +1,45 @@
 name: Build Firmware
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  firmware:
+    uses: ./.github/workflows/firmware.yml
+
+  host-tests:
+    name: PC tests (ASan/UBSan, Rust)
+    runs-on: ubuntu-24.04
+    # Ubuntu 26.04: GCC 15 (-std=gnu23), mbedTLS 3.6, cJSON 1.7.
+    container: ubuntu:26.04
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '22.15.0'
-    - name: Build web dist
-      working-directory: ./main/http_server/axe-os
-      run: |
-        npm ci
-        npm run build
-    - name: esp-idf build
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.2
-        target: esp32s3
-        command: GITHUB_ACTIONS="true" idf.py build
-        path: '.'
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        cache: 'pip'
-    - run: pip install esptool
-    - name: "Create factory/merged image"
-      run: "./merge_bin.sh ./esp-miner-merged.bin"
-    - name: upload esp-miner-merged.bin
-      uses: actions/upload-artifact@v4
-      with:
-        name: esp-miner-factory.bin
-        path: ./esp-miner-merged.bin
-    - name: upload esp-miner.bin
-      uses: actions/upload-artifact@v4
-      with:
-        name: esp-miner.bin
-        path: ./build/esp-miner.bin
-    - name: upload www.bin
-      uses: actions/upload-artifact@v4
-      with:
-        name: www.bin
-        path: ./build/www.bin
+      - name: Install packages
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential git ca-certificates curl python3 libmbedtls-dev libcjson-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # cJSON and mbedTLS headers, as in a local ~/esp/esp-idf 5.5 (ESP-IDF 6.1 has no cJSON).
+      - name: ESP-IDF 5.5.2 sources
+        run: |
+          git clone --quiet --depth 1 --branch v5.5.2 https://github.com/espressif/esp-idf.git /opt/esp-idf-5.5
+          git -C /opt/esp-idf-5.5 -c advice.detachedHead=false submodule update --quiet --init --depth 1 \
+            components/json/cJSON components/mbedtls/mbedtls
+
+      - name: Rust 1.99.1
+        run: |
+          curl --proto '=https' -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Run PC tests
+        env:
+          IDF_PATH: /opt/esp-idf-5.5
+        run: tools/ci/host-tests.sh
