@@ -1,11 +1,14 @@
 # Published GitHub release (pre-release or release): builds the firmware once, then
 # attaches esp-miner.bin, www.bin (AxeOS OTA updates) and one factory image per board
 # (bootloader + partition table + board config + firmware + www).
+# Run manually (workflow_dispatch), it builds the same files as a run artifact and
+# publishes nothing.
 name: Release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,16 +25,16 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download firmware
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: firmware
           path: build
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -41,7 +44,7 @@ jobs:
 
       - name: Factory images
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || format('test-{0}', github.sha) }}
         run: |
           # merge_bin.sh calls esptool.py; esptool 5 is run as a module.
           esptool.py() { python -m esptool "$@"; }
@@ -55,7 +58,16 @@ jobs:
           done
           ls -l release
 
+      - name: Upload artifact (manual run)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          if-no-files-found: error
+          path: release/*.bin
+
       - name: Upload to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}

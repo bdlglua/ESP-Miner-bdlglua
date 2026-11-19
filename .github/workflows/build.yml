@@ -25,7 +25,7 @@ jobs:
             build-essential git ca-certificates curl python3 libmbedtls-dev libcjson-dev
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # cJSON and mbedTLS headers, as in a local ~/esp/esp-idf 5.5 (ESP-IDF 6.1 has no cJSON).
       - name: ESP-IDF 5.5.2 sources
